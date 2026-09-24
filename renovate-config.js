@@ -30,9 +30,6 @@ module.exports = {
   labels: ["dependencies"],
   branchPrefix: "renovate/",
 
-  // Commit as our own bot account instead of Renovate's Mend-owned default.
-  gitAuthor: "team-yosemite-bot <teamyosemitebot@octopus.com>",
-
   enabledManagers: ["gomod", "dockerfile", "github-actions"],
 
   // Run `go mod tidy` after a gomod update so go.sum and the indirect
