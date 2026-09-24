@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.3](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.31.2...v0.31.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* remove unnecessary commit author ([#12](https://github.com/OctopusDeploy/kubernetes-monitor/issues/12)) ([ab86722](https://github.com/OctopusDeploy/kubernetes-monitor/commit/ab8672276090dceec44ce5400128a52006feba94))
+
 ## [0.31.2](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.31.1...v0.31.2) (2026-09-24)
 
 
