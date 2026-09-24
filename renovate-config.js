@@ -206,8 +206,9 @@ module.exports = {
     // GITHUB ACTIONS (manager: github-actions)
     // ************************************************************************
     {
-      // For security, pin third-party actions to an immutable commit SHA rather
-      // than a mutable tag. Renovate keeps the "# vX.Y.Z" comment updated.
+      // For security, pin every action (official actions/** included) to an
+      // immutable commit SHA rather than a mutable tag. Renovate keeps the
+      // "# vX.Y.Z" comment updated.
       // https://docs.renovatebot.com/modules/manager/github-actions/#digest-pinning-and-updating
       matchManagers: ["github-actions"],
       // Only pin real `uses:` action references (depType "action"). The
@@ -217,27 +218,18 @@ module.exports = {
       // plain version string can't find a target and fails the whole grouped
       // pin-dependencies branch, so restrict pinning to actual actions.
       matchDepTypes: ["action"],
-      matchPackageNames: [
-        "!actions/**", // Trust official GitHub actions (actions/checkout, etc.); they change often and pinning is noisy.
-      ],
       addLabels: ["github-actions"],
       pinDigests: true,
       // Track the full vX.Y.Z release tag so the pinned SHA gets a `# v4.2.1`
-      // comment instead of the bare `# v4` from a `@v4` reference. Copied from
-      // helpers:pinGitHubActionDigestsToSemver rather than extended, since that
-      // preset also pins official actions/** (which we exclude above).
+      // comment instead of the bare `# v4` from a `@v4` reference. Same as
+      // helpers:pinGitHubActionDigestsToSemver, inlined so it sits alongside
+      // the rest of the github-actions rules.
       // https://docs.renovatebot.com/presets-helpers/#helperspingithubactiondigeststosemver
       extractVersion: "^(?<version>v?\\d+\\.\\d+\\.\\d+)$",
       versioning: "regex:^v?(?<major>\\d+)(\\.(?<minor>\\d+)\\.(?<patch>\\d+))?$",
     },
     {
-      // Label official GitHub actions too, but don't pin them (see above).
-      matchManagers: ["github-actions"],
-      matchPackageNames: ["actions/**"],
-      addLabels: ["github-actions"],
-    },
-    {
-      // Batch all `uses:` action updates (pinned third-party + official) into a
+      // Batch all `uses:` action updates into a
       // single PR to cut review noise; they're independent and bump frequently.
       // Restricted to depType "action" so `uses-with` tool versions (e.g. the
       // helm version from azure/setup-helm) stay in their own PRs.
