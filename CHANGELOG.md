@@ -5,6 +5,13 @@
 These entries preserve the release history before the public repository was created.
 Links to private commits and pull requests have been omitted; version numbers are unchanged.
 
+## [0.31.2](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.31.1...v0.31.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* update a comment to force a release ([#2](https://github.com/OctopusDeploy/kubernetes-monitor/issues/2)) ([85dc33d](https://github.com/OctopusDeploy/kubernetes-monitor/commit/85dc33dd143932dabd09247d3c52e1214f44591a))
+
 ## 0.31.1 (2026-09-24)
 
 
