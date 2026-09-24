@@ -36,7 +36,7 @@ require (
 	k8s.io/api v0.37.0
 	k8s.io/apimachinery v0.37.0
 	k8s.io/client-go v0.37.0
-	sigs.k8s.io/e2e-framework v0.6.0
+	sigs.k8s.io/e2e-framework v0.7.0
 	sigs.k8s.io/yaml v1.6.0
 )
 
@@ -163,7 +163,7 @@ require (
 	github.com/spf13/cast v1.10.0 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	github.com/vladimirvivien/gexe v0.4.1 // indirect
+	github.com/vladimirvivien/gexe v0.5.0 // indirect
 	github.com/vmihailenco/go-tinylfu v0.2.2 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
