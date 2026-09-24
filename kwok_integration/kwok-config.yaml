@@ -1,0 +1,35 @@
+apiVersion: kwok.x-k8s.io/v1alpha1
+kind: KwokctlConfiguration
+options:
+  runtime: docker
+  kubeVersion: v1.30.0
+  # Let the memory profile test push enough API traffic through to hit GB scale.
+  disableQPSLimits: true
+---
+kind: ClusterLogs
+apiVersion: kwok.x-k8s.io/v1alpha1
+metadata:
+  name: long-logs
+spec:
+  selector:
+    matchNamespaces:
+    matchNames:
+      - long-logs
+  logs:
+    - containers:
+      logsFile: ../testdata/longlog.log
+      follow: false
+---
+kind: ClusterLogs
+apiVersion: kwok.x-k8s.io/v1alpha1
+metadata:
+  name: short-logs
+spec:
+  selector:
+    matchNamespaces:
+    matchNames:
+      - short-logs
+  logs:
+    - containers:
+      logsFile: ../testdata/shortlog.log
+      follow: false

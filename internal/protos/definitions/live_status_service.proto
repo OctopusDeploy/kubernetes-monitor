@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+import "application_instance_id.proto";
+import "desired_resource_id.proto";
+import "cluster_id.proto";
+import "resource_details.proto";
+import "sync_status.proto";
+import "yaml_manifest.proto";
+
+// Service to update the status of Kubernetes resources
+service LiveStatusService {
+  rpc UpdateMonitoredResources (UpdateMonitoredResourcesRequest) returns (UpdateMonitoredResourcesResponse);
+  rpc ReplaceMonitoredResources (ReplaceMonitoredResourcesRequest) returns (ReplaceMonitoredResourcesResponse);
+  rpc DeleteChildMonitoredResources (DeleteChildMonitoredResourcesRequest) returns (DeleteChildMonitoredResourcesResponse);
+}
+
+// Request to add new resources to the live status or update the status of resources already being tracked
+message UpdateMonitoredResourcesRequest {
+  ApplicationInstanceId application_instance_id = 1;
+  ClusterId cluster_id = 2;
+  repeated PresentMonitoredResource present_monitored_resources = 4;
+  repeated ChildMonitoredResource child_monitored_resources = 5;
+  repeated MissingMonitoredResource missing_monitored_resources = 6;
+  repeated UnknownMonitoredResource unknown_monitored_resources = 7;
+}
+
+message UpdateMonitoredResourcesResponse {}
+
+// Request to replace all existing tracked live resources with resources provided
+message ReplaceMonitoredResourcesRequest {
+  ApplicationInstanceId application_instance_id = 1;
+  ClusterId cluster_id = 2;
+  repeated PresentMonitoredResource present_monitored_resources = 4;
+  repeated ChildMonitoredResource child_monitored_resources = 5;
+  repeated MissingMonitoredResource missing_monitored_resources = 6;
+  repeated UnknownMonitoredResource unknown_monitored_resources = 7;
+}
+
+message ReplaceMonitoredResourcesResponse {}
+
+// Request to delete existing tracked live resources
+message DeleteChildMonitoredResourcesRequest {
+  ApplicationInstanceId application_instance_id = 1;
+  ClusterId cluster_id = 2;
+  repeated ResourceKey resource_keys = 3;
+}
+
+message DeleteChildMonitoredResourcesResponse {}
+
+message ResourceKey {
+  string name = 1;
+  string kubernetes_namespace = 2;
+  string group = 3;
+  string kind = 4;
+}
+
+// An active kubernetes resource in the cluster
+message PresentMonitoredResource {
+  DesiredResourceId desired_resource_id = 1;
+  ClusterId cluster_id = 2;
+  UUID resource_uuid = 3;
+  ResourceDetails resource_details = 4;
+  ResourceStatus resource_status = 5;
+  SyncStatus resource_sync_status = 6;
+  YamlManifest manifest = 7;
+}
+
+// An active kubernetes resource in the cluster that only has a relationship to a parent that we are monitoring
+message ChildMonitoredResource {
+  UUID parent_resource_uuid = 1;
+  ClusterId cluster_id = 2;
+  UUID resource_uuid = 3;
+  ResourceDetails resource_details = 4;
+  ResourceStatus resource_status = 5;
+  YamlManifest manifest = 6;
+  UUID root_parent_resource_uuid = 7;
+}
+
+// A kubernetes resource that is desired but not in the cluster
+message MissingMonitoredResource {
+  DesiredResourceId desired_resource_id = 1;
+  ClusterId cluster_id = 2;
+  ResourceDetails resource_details = 3;
+  ResourceStatus resource_status = 4;
+  SyncStatus resource_sync_status = 5;
+}
+
+// A kubernetes resource that we cannot correctly associate due to missing data
+message UnknownMonitoredResource {
+  DesiredResourceId desired_resource_id = 1;
+  ClusterId cluster_id = 2;
+  ResourceStatus resource_status = 3;
+  SyncStatus resource_sync_status = 4;
+}
+
+message UUID {
+  string value = 1;
+}
+
+message ResourceStatus {
+  ResourceStatusCode resource_status_code = 1;
+  string message = 2;
+}
+
+enum ResourceStatusCode {
+  RESOURCE_STATUS_CODE_UNSPECIFIED = 0;
+  RESOURCE_STATUS_CODE_UNKNOWN = 1;
+  RESOURCE_STATUS_CODE_DEGRADED = 2;
+  RESOURCE_STATUS_CODE_MISSING = 3;
+  RESOURCE_STATUS_CODE_SUSPENDED = 4;
+  RESOURCE_STATUS_CODE_PROGRESSING = 5;
+  RESOURCE_STATUS_CODE_HEALTHY = 6;
+  RESOURCE_STATUS_CODE_NOTAPPLICABLE = 7;
+}

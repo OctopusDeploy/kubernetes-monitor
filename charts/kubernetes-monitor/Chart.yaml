@@ -1,0 +1,13 @@
+apiVersion: v2
+name: kubernetes-monitor-chart
+description: A Helm chart for the kubernetes monitor
+home: https://octopus.com
+sources:
+  - https://github.com/OctopusDeploy/kubernetes-monitor
+maintainers:
+  - name: Octopus Deploy
+    email: support@octopus.com
+    url: https://octopus.com
+type: application
+version: 0.42.0
+appVersion: 0.31.1

@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+import "application_instance_id.proto";
+import "desired_resource_id.proto";
+import "cluster_id.proto";
+import "resource_details.proto";
+import "yaml_manifest.proto";
+
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+// Service for receiving commands from the server, follows a subscription model using a long lived RPC stream 
+service CommandsService {
+  rpc SubscribeToCommands (stream ClientToServerStream) returns (stream ServerToClientStream);
+}
+
+// Request to initiate a subscription
+message ClientToServerStream {
+  oneof command {
+    RequestInitializationCommand request_initialization_command = 1;
+  }
+}
+
+message RequestInitializationCommand {}
+
+// Response from the server containing a single command to be processed
+message ServerToClientStream {
+  oneof command {
+    UpdateDesiredResourcesCommand update_desired_resources_command = 1;
+    PruneOtherVersionsCommand prune_other_versions_command = 2 [deprecated = true];
+    DeleteDesiredResourcesCommand delete_desired_resources_command = 3;
+    ReplaceDesiredResourcesCommand replace_desired_resources_command = 4;
+  }
+}
+
+// Add or updates the resources to be monitored
+message UpdateDesiredResourcesCommand {
+  ApplicationInstanceId application_instance_id = 1;
+  ClusterId cluster_id = 2;
+  Version version = 3;
+  repeated DesiredResource desired_resources = 4;
+  string hash_salt = 5;
+}
+
+// Replaces the entire set of resources to be monitored for the application instance/cluster.
+message ReplaceDesiredResourcesCommand {
+  ApplicationInstanceId application_instance_id = 1;
+  ClusterId cluster_id = 2;
+  repeated DesiredResource desired_resources = 3;
+  string hash_salt = 4;
+}
+
+// Removes desired resources that do not match the supplied version for the application instance/cluster
+message PruneOtherVersionsCommand {
+  ApplicationInstanceId application_instance_id = 1;
+  ClusterId cluster_id = 2;
+  Version version = 3;
+}
+
+// Removes the specific desired resources listed from the in-memory watch list for the application instance/cluster
+message DeleteDesiredResourcesCommand {
+  ApplicationInstanceId application_instance_id = 1;
+  ClusterId cluster_id = 2;
+  repeated DesiredResourceId resource_ids = 3;
+}
+
+// A kubernetes resource to be watched by the Kubernetes monitor
+message DesiredResource {
+  DesiredResourceId desired_resource_id = 1;
+  DesiredResourceDetails resource_details = 2;
+  YamlManifest manifest = 3;
+  // When Octopus stopped expecting this resource. Unset means it is still expected.
+  google.protobuf.Timestamp orphaned_at = 4;
+}
+
+// Deployment ID in Octopus
+message Version {
+  string value = 1;
+}

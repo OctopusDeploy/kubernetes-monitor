@@ -1,0 +1,134 @@
+{{ if .Values.registration.register }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "kubernetes-monitor.registration.podName" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "kubernetes-monitor.labels" . | nindent 4 }}
+    {{- with .Values.podLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- include "kubernetes-monitor.registration.hookAnnotations" . | nindent 4 }}
+    {{- with .Values.podAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.registration.spec }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  restartPolicy: OnFailure
+  serviceAccountName: {{ include "kubernetes-monitor.registration.serviceAccountName" . }}
+  {{- with .Values.podSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if or (include "kubernetes-monitor.serverCertificate.secretName" .) (not .Values.registration.serviceAccount.automountServiceAccountToken) }}
+  volumes:
+    {{- if (include "kubernetes-monitor.serverCertificate.secretName" .) }}
+    - name: server-certificate
+      secret:
+        secretName: {{ include "kubernetes-monitor.serverCertificate.secretName" . }}
+        items:
+          - key: octopus-server-certificate.pem
+            path: octopus-server-certificate.pem
+    {{- end }}
+    {{- if not .Values.registration.serviceAccount.automountServiceAccountToken }}
+    - name: kube-api-access
+      projected:
+        defaultMode: {{ .Values.registration.serviceAccount.projectedVolumeDefaultMode | default 0444 }}
+        sources:
+          - serviceAccountToken:
+              expirationSeconds: 86400
+              path: token
+          - configMap:
+              name: kube-root-ca.crt
+              items:
+                - key: ca.crt
+                  path: ca.crt
+          - downwardAPI:
+              items:
+                - path: namespace
+                  fieldRef:
+                    apiVersion: v1
+                    fieldPath: metadata.namespace
+    {{- end }}
+  {{- end}}
+  containers:
+    - name: registration
+      {{- with .Values.registration.containers.registration.spec }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- with .Values.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      image: {{ include "kubernetes-monitor.fullImage" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - /monitor
+      args:
+        - register
+      {{- with .Values.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or (include "kubernetes-monitor.serverCertificate.secretName" .) (not .Values.registration.serviceAccount.automountServiceAccountToken) }}
+      volumeMounts:
+        {{- if (include "kubernetes-monitor.serverCertificate.secretName" .) }}
+        - mountPath: /certs
+          name: server-certificate
+        {{- end }}
+        {{- if not .Values.registration.serviceAccount.automountServiceAccountToken }}
+        - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          name: kube-api-access
+          readOnly: true
+        {{- end }}
+      {{- end}}
+      envFrom:
+        - secretRef:
+            name: {{ include "kubernetes-monitor.authentication.secretName" .}}
+            optional: true
+      env:
+        - name: "SERVER_ACCESS_TOKEN"
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "kubernetes-monitor.registration.secretName"  . }}
+              key: {{ include "kubernetes-monitor.registration.secretKey" . }}
+        - name: "CONFIG_STORE"
+          value: "{{ .Values.registration.configurationStoreType }}"
+        - name: "SERVER_API_URL"
+          value: "{{ required "When automatically registering, you must supply registration.serverApiUrl" (include "kubernetes-monitor.serverApiUrl" .) }}"
+        - name: "MACHINE_NAME"
+          value: "{{ required "When automatically registering, you must supply registration.machineName" .Values.registration.machineName }}"
+        - name: "SPACE_ID"
+          value: "{{ required "When automatically registering, you must supply registration.spaceId" .Values.registration.spaceId }}"
+        - name: "KUBERNETES_STORE_PREFIX"
+          value: "{{ include "kubernetes-monitor.authentication.secretPrefix" . }}"
+        - name: "KUBERNETES_STORE_NAMESPACE"
+          value: "{{ .Release.Namespace }}"
+        {{- if (include "kubernetes-monitor.serverCertificate.secretName" .) }}
+        - name: "CA_CERTIFICATE_PATH"
+          value: "/certs/octopus-server-certificate.pem"
+        {{- end }}
+        {{- with .Values.registration.containers.registration.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end}}

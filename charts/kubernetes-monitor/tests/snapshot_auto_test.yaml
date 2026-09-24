@@ -1,0 +1,10 @@
+suite: Snapshot - Automatic Registration
+tests:
+  - it: should match snapshot for automatic registration
+    values:
+      - './values/automatic_registration_base_values.yaml'
+    chart:
+      version: 1.2.3
+      appVersion: 4.5.6
+    asserts:
+      - matchSnapshot: { }

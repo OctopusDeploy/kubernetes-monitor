@@ -1,0 +1,14 @@
+{{- if (include "kubernetes-monitor.serverCertificate.certificate" .) -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kubernetes-monitor.serverCertificate.secretName"  . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "kubernetes-monitor.labels" . | nindent 4 }}
+  annotations:
+    {{- include "kubernetes-monitor.registration.hookAnnotations" . | nindent 4 }}
+    "helm.sh/hook-weight": "-5"
+data:
+  octopus-server-certificate.pem: {{ include "kubernetes-monitor.serverCertificate.certificate" . | quote }}
+{{- end }}

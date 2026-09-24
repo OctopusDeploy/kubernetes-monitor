@@ -1,0 +1,16 @@
+syntax = "proto3";
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+message Error {
+  string message = 1;
+  ErrorCode code = 2;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_UNEXPECTED = 1;
+  ERROR_CODE_CONFLICT = 2;
+  ERROR_CODE_NOT_FOUND = 3;
+  ERROR_CODE_PERMISSION_DENIED = 4;
+}

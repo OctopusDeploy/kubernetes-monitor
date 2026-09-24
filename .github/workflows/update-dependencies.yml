@@ -1,0 +1,42 @@
+name: Renovate update dependencies
+concurrency: renovate
+on:
+  schedule:
+    # 09:00 AEST (UTC+10), Monday–Friday: 23:00 UTC on Sunday–Thursday.
+    - cron: '0 23 * * 0-4'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Dry run'
+        required: false
+        default: true
+        type: boolean
+      log-level:
+        description: 'Renovate log level'
+        required: false
+        default: 'info'
+        type: choice
+        options:
+          - info
+          - debug
+          - trace
+          - warn
+          - error
+
+jobs:
+  renovate:
+    name: Self-hosted Renovate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Self-hosted Renovate
+        uses: renovatebot/github-action@e26264186543fd355dc60776e21f7fbb67ce6f85 # v46.3.2
+        with:
+          configurationFile: renovate-config.js
+          token: ${{ secrets.RENOVATE_GITHUB_TOKEN }}
+        env:
+          # On scheduled runs there are no inputs, so fall back to Renovate's
+          # own default log level (info).
+          LOG_LEVEL: ${{ inputs.log-level || 'info' }}
+          RENOVATE_DRY_RUN: ${{ inputs.dry-run && 'full' || null }}

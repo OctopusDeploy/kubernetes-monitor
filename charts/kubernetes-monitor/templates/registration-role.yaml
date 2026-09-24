@@ -1,0 +1,22 @@
+{{- if and .Values.registration.register .Values.registration.serviceAccount.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kubernetes-monitor.registration.roleName" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "kubernetes-monitor.labels" . | nindent 4 }}
+  annotations:
+    {{- include "kubernetes-monitor.registration.hookAnnotations" . | nindent 4 }}
+    "helm.sh/hook-weight": "-5"
+rules:
+  - verbs:
+      - get
+      - list
+      - create
+      - update
+    apiGroups:
+      - ''
+    resources:
+      - 'secrets'
+{{- end }}

@@ -1,0 +1,16 @@
+{{- if and .Values.serviceAccount.create (or (empty .Values.global.targetNamespaces) .Values.monitor.clusterScopedResources) -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name:  {{ include "kubernetes-monitor.kubernetesMonitorRoleBindingName" . }}
+  labels:
+    {{- include "kubernetes-monitor.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "kubernetes-monitor.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace | quote }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "kubernetes-monitor.kubernetesMonitorRoleName" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

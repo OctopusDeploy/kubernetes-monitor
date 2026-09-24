@@ -1,0 +1,134 @@
+suite: Test Projected Volume Configuration
+templates:
+  - monitor-deployment.yaml
+  - registration-pod.yaml
+tests:
+  # Monitor Deployment Tests
+  - it: should not create projected volume when automountServiceAccountToken is true
+    template: monitor-deployment.yaml
+    values:
+      - values/automatic_registration_base_values.yaml
+    asserts:
+      - notExists:
+          path: spec.template.spec.volumes
+
+  - it: should create projected volume when automountServiceAccountToken is false
+    template: monitor-deployment.yaml
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      serviceAccount.automountServiceAccountToken: false
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: kube-api-access
+            projected:
+              defaultMode: 0444
+              sources:
+                - serviceAccountToken:
+                    expirationSeconds: 86400
+                    path: token
+                - configMap:
+                    name: kube-root-ca.crt
+                    items:
+                      - key: ca.crt
+                        path: ca.crt
+                - downwardAPI:
+                    items:
+                      - path: namespace
+                        fieldRef:
+                          apiVersion: v1
+                          fieldPath: metadata.namespace
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+            name: kube-api-access
+            readOnly: true
+
+  - it: should handle both custom CA and projected volume
+    template: monitor-deployment.yaml
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      serviceAccount.automountServiceAccountToken: false
+      monitor.customCaCertificate: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t"
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.volumes
+          count: 2
+      - equal:
+          path: spec.template.spec.volumes[0].name
+          value: ca-certificate
+      - equal:
+          path: spec.template.spec.volumes[1].name
+          value: kube-api-access
+      - lengthEqual:
+          path: spec.template.spec.containers[0].volumeMounts
+          count: 2
+
+  # Registration Pod Tests
+  - it: should not create projected volume for registration when automountServiceAccountToken is true
+    template: registration-pod.yaml
+    values:
+      - values/automatic_registration_base_values.yaml
+    asserts:
+      - notExists:
+          path: spec.volumes
+
+  - it: should create projected volume for registration when automountServiceAccountToken is false
+    template: registration-pod.yaml
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      registration.serviceAccount.automountServiceAccountToken: false
+    asserts:
+      - contains:
+          path: spec.volumes
+          content:
+            name: kube-api-access
+            projected:
+              defaultMode: 0444
+              sources:
+                - serviceAccountToken:
+                    expirationSeconds: 86400
+                    path: token
+                - configMap:
+                    name: kube-root-ca.crt
+                    items:
+                      - key: ca.crt
+                        path: ca.crt
+                - downwardAPI:
+                    items:
+                      - path: namespace
+                        fieldRef:
+                          apiVersion: v1
+                          fieldPath: metadata.namespace
+      - contains:
+          path: spec.containers[0].volumeMounts
+          content:
+            mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+            name: kube-api-access
+            readOnly: true
+
+  - it: should handle both server certificate and projected volume for registration
+    template: registration-pod.yaml
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      registration.serviceAccount.automountServiceAccountToken: false
+      registration.serverCertificate: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t"
+    asserts:
+      - lengthEqual:
+          path: spec.volumes
+          count: 2
+      - equal:
+          path: spec.volumes[0].name
+          value: server-certificate
+      - equal:
+          path: spec.volumes[1].name
+          value: kube-api-access
+      - lengthEqual:
+          path: spec.containers[0].volumeMounts
+          count: 2

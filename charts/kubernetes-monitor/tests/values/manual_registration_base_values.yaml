@@ -1,0 +1,7 @@
+monitor:
+  serverGrpcUrl: "server-grpc-url"
+  installationId: "install-id-here"
+  authenticationToken: "auth-token-here"
+
+registration:
+  register: false

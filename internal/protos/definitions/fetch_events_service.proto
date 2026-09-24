@@ -1,0 +1,10 @@
+syntax = "proto3";
+import "fetch_events_request.proto";
+import "fetch_events_response.proto";
+
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+service FetchEventsService {
+  rpc FetchEvents (stream FetchEventsResponse) returns (stream FetchEventsRequest);
+}

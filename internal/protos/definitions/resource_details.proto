@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+message DesiredResourceDetails {
+  string name = 1;
+  string assumed_namespace = 2;
+  GroupVersionKind group_version_kind = 3;
+}
+
+message ResourceDetails {
+  string name = 1;
+  string kubernetes_namespace = 2;
+  GroupVersionKind group_version_kind = 3;
+}
+
+message GroupVersionKind {
+  string group = 1;
+  string version = 2;
+  string kind = 3;
+}

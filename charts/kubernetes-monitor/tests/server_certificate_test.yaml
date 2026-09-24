@@ -1,0 +1,67 @@
+suite: server certificate for registration pod
+templates:
+  - registration-pod.yaml
+  - registration-server-certificate.yaml
+tests:
+  - it: creates and uses a certificate with the provided certificate
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      registration:
+        serverCertificate: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUYzekNDQThlZ=="
+    asserts:
+      - template: registration-server-certificate.yaml
+        equal:
+          path: data["octopus-server-certificate.pem"]
+          value: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUYzekNDQThlZ=="
+      - template: registration-pod.yaml
+        equal:
+          path: spec.volumes[?(@.name=='server-certificate')].secret.secretName
+          value: "release-name-kubernetes-monitor-chart-server-certificate"
+
+  - it: does not create a certificate secret when using an existing secret
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      global:
+        serverCertificateSecretName: "my-existing-secret"
+    asserts:
+      - containsDocument:
+          apiVersion: v1
+          kind: Secret
+          any: true
+        not: true
+      - template: registration-pod.yaml
+        equal:
+          path: spec.volumes[?(@.name=='server-certificate')].secret.secretName
+          value: "my-existing-secret"
+
+  # Global value
+  - it: creates and uses a certificate with the provided certificate when using a global value
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      registration:
+        serverCertificate: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUYzekNDQThlZ=="
+    asserts:
+      - template: registration-server-certificate.yaml
+        equal:
+          path: data["octopus-server-certificate.pem"]
+          value: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUYzekNDQThlZ=="
+
+  - it: does not create a certificate secret when using an existing secret when using a global value
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      global:
+        serverCertificateSecretName: "my-existing-secret"
+    asserts:
+      - containsDocument:
+          apiVersion: v1
+          kind: Secret
+          any: true
+        not: true
+      - template: registration-pod.yaml
+        equal:
+          path: spec.volumes[?(@.name=='server-certificate')].secret.secretName
+          value: "my-existing-secret"

@@ -1,0 +1,99 @@
+name: Build and Push Image
+run-name: "Build and Push Image"
+
+# Run on PRs and releases
+# We only push to production on a release
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  release:
+    types: [published]
+
+env:
+  prerelease_registry: "docker.packages.octopushq.com"
+  image_name: "octopusdeploy/kubernetes-monitor"
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'release' && !startsWith(github.ref, 'refs/tags/kubernetes-monitor-chart')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check for significant changes
+        id: changed-files-specific
+        uses: tj-actions/changed-files@9426d40962ed5378910ee2e21d5f8c6fcbf2dd96 # v47.0.6
+        with:
+          files_ignore: |
+            charts/**
+            .release-please-manifest.json
+            release-please-config.json
+            .github/**
+            **.md
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: depot/setup-action@91bc8495a33ebfc504ffc89e5674379ccf23c29c # v1.7.2
+
+      # Helm automatically sets the image version as a label, with a limit of 63 which is exceeded by pre-release builds
+      - name: Set short git commit SHA
+        id: vars
+        run: |
+          calculatedSha=$(git rev-parse --short ${{ github.sha }})
+          echo "SHORT_SHA=$calculatedSha" >> $GITHUB_ENV
+
+      - name: Determine PR version
+        if: github.event_name == 'pull_request'
+        id: new_version
+        run: |
+          BRANCH_NAME=$(echo ${{ github.head_ref }} | tr '/' '-' | tr '_' '-')
+          CURRENT_VERSION=$(git describe --tags --abbrev=0 || echo "0.0.0")
+          VERSION="${CURRENT_VERSION}-${BRANCH_NAME}-${{ env.SHORT_SHA }}"
+          echo "version=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Generate application version
+        if: github.event_name == 'release'
+        id: release_version
+        run: |
+          echo "version=${{ github.event.release.tag_name }}" >> "$GITHUB_ENV"
+
+      - name: Login to Artifactory
+        if: github.event_name == 'release' || steps.changed-files-specific.outputs.any_changed == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: "docker.packages.octopushq.com"
+          username: ${{ secrets.ARTIFACTORY_USERNAME }}
+          password: ${{ secrets.ARTIFACTORY_PASSWORD }}
+
+
+      - name: Build and push to artifactory
+        if: github.event_name == 'release' || steps.changed-files-specific.outputs.any_changed == 'true'
+        uses: depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1.18.0
+        with:
+          project: 6nsnwhw6t5
+          push: true
+          tags: "${{ env.prerelease_registry }}/${{ env.image_name }}:${{ env.version }}"
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ env.version }}
+
+      # Only push to production if it's a release
+      - name: Login to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        if: github.event_name == 'release'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Push image to Docker Hub
+        if: github.event_name == 'release'
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.image_name }}:${{ env.version }} \
+            --tag ${{ env.image_name }}:latest \
+            ${{ env.prerelease_registry }}/${{ env.image_name }}:${{ env.version }}
+

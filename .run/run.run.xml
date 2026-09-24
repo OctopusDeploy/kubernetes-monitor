@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="run" type="GoApplicationRunConfiguration" factoryName="Go Application">
+    <module name="kubernetes-monitor" />
+    <working_directory value="$PROJECT_DIR$" />
+    <parameters value="--debug --use-kubeconfig --config-path=configuration/$Prompt:Config Name:default$/" />
+    <kind value="PACKAGE" />
+    <package value="github.com/octopusdeploy/kubernetes-monitor" />
+    <directory value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$/main.go" />
+    <method v="2" />
+  </configuration>
+</component>

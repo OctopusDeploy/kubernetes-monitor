@@ -1,0 +1,262 @@
+suite: Test RBAC resources
+templates:
+  - monitor-clusterbinding.yaml
+  - monitor-clusterroles.yaml
+  - monitor-rolebinding.yaml
+  - monitor-roles.yaml
+tests:
+  - it: should create ClusterRole when targetNamespaces is not set
+    template: monitor-clusterroles.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ClusterRole
+      - matchRegex:
+          path: metadata.name
+          pattern: -role$
+      - equal:
+          path: rules[0].verbs
+          value: ["get", "watch", "list"]
+      - equal:
+          path: rules[0].apiGroups
+          value: ["*"]
+      - equal:
+          path: rules[0].resources
+          value: ["*"]
+
+  - it: should create ClusterRoleBinding when targetNamespaces is not set
+    template: monitor-clusterbinding.yaml
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: ClusterRoleBinding
+      - matchRegex:
+          path: metadata.name
+          pattern: -binding$
+      - equal:
+          path: roleRef.kind
+          value: ClusterRole
+      - matchRegex:
+          path: roleRef.name
+          pattern: -role$
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+      - isNotNull:
+          path: subjects[0].name
+
+  - it: should not create namespace-scoped RBAC when targetNamespaces is not set
+    templates:
+      - monitor-roles.yaml
+      - monitor-rolebinding.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Namespace-scoped
+  - it: should create Role when targetNamespaces is set
+    template: monitor-roles.yaml
+    set:
+      global.targetNamespaces: ["monitoring"]
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: Role
+      - matchRegex:
+          path: metadata.name
+          pattern: -role$
+      - equal:
+          path: metadata.namespace
+          value: monitoring
+      - equal:
+          path: rules[0].verbs
+          value: ["get", "watch", "list"]
+      - equal:
+          path: rules[0].apiGroups
+          value: ["*"]
+      - equal:
+          path: rules[0].resources
+          value: ["*"]
+
+  - it: should create RoleBinding when targetNamespaces is set
+    template: monitor-rolebinding.yaml
+    set:
+      global.targetNamespaces: ["monitoring"]
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: RoleBinding
+      - matchRegex:
+          path: metadata.name
+          pattern: -binding$
+      - equal:
+          path: metadata.namespace
+          value: monitoring
+      - equal:
+          path: roleRef.kind
+          value: Role
+      - matchRegex:
+          path: roleRef.name
+          pattern: -role$
+      - equal:
+          path: subjects[0].kind
+          value: ServiceAccount
+      - isNotNull:
+          path: subjects[0].name
+
+  - it: should not create cluster-scoped RBAC when targetNamespaces is set
+    set:
+      global.targetNamespaces: ["monitoring"]
+    templates:
+      - monitor-clusterroles.yaml
+      - monitor-clusterbinding.yaml
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should create Role and RoleBinding for each target namespace
+    templates:
+      - monitor-roles.yaml
+      - monitor-rolebinding.yaml
+    set:
+      global.targetNamespaces: ["monitoring", "production"]
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  # clusterScopedResources with targetNamespaces
+  - it: should create ClusterRole and ClusterRoleBinding when targetNamespaces is set with clusterScopedResources enabled
+    templates:
+      - monitor-clusterroles.yaml
+      - monitor-clusterbinding.yaml
+    set:
+      global.targetNamespaces: ["monitoring"]
+      monitor.clusterScopedResources: true
+    asserts:
+      - hasDocuments:
+          count: 1
+
+  - it: should not create namespace-scoped Roles when targetNamespaces is set with clusterScopedResources enabled
+    templates:
+      - monitor-roles.yaml
+      - monitor-rolebinding.yaml
+    set:
+      global.targetNamespaces: ["monitoring"]
+      monitor.clusterScopedResources: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: should not create any RBAC when serviceAccount.create is false
+    set:
+      serviceAccount.create: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # Custom rules
+  - it: should render custom rules on ClusterRole with hardcoded verbs
+    template: monitor-clusterroles.yaml
+    set:
+      monitor.rules:
+        - apiGroups: [""]
+          resources: ["pods", "services"]
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: rules
+          value:
+            - verbs: ["get", "watch", "list"]
+              apiGroups: [""]
+              resources: ["pods", "services"]
+
+  - it: should render multiple custom rules on ClusterRole with hardcoded verbs
+    template: monitor-clusterroles.yaml
+    set:
+      monitor.rules:
+        - apiGroups: [""]
+          resources: ["pods"]
+        - apiGroups: ["apps"]
+          resources: ["deployments", "statefulsets"]
+    asserts:
+      - hasDocuments:
+          count: 1
+      - lengthEqual:
+          path: rules
+          count: 2
+      - equal:
+          path: rules[0]
+          value:
+            verbs: ["get", "watch", "list"]
+            apiGroups: [""]
+            resources: ["pods"]
+      - equal:
+          path: rules[1]
+          value:
+            verbs: ["get", "watch", "list"]
+            apiGroups: ["apps"]
+            resources: ["deployments", "statefulsets"]
+
+  - it: should render custom rules on Role with hardcoded verbs
+    template: monitor-roles.yaml
+    set:
+      global.targetNamespaces: ["monitoring"]
+      monitor.rules:
+        - apiGroups: [""]
+          resources: ["configmaps"]
+        - apiGroups: ["apps"]
+          resources: ["deployments"]
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: rules
+          value:
+            - verbs: ["get", "watch", "list"]
+              apiGroups: [""]
+              resources: ["configmaps"]
+            - verbs: ["get", "watch", "list"]
+              apiGroups: ["apps"]
+              resources: ["deployments"]
+
+  - it: should always emit get/watch/list verbs even when values omit a verbs field
+    template: monitor-clusterroles.yaml
+    set:
+      monitor.rules:
+        - apiGroups: [""]
+          resources: ["pods"]
+          verbs: ["delete", "create"]
+    asserts:
+      - equal:
+          path: rules[0].verbs
+          value: ["get", "watch", "list"]
+
+  - it: should render the same Role rules across multiple target namespaces
+    template: monitor-roles.yaml
+    set:
+      global.targetNamespaces: ["monitoring", "production"]
+      monitor.rules:
+        - apiGroups: [""]
+          resources: ["pods"]
+    asserts:
+      - hasDocuments:
+          count: 2
+      - equal:
+          path: rules
+          value:
+            - verbs: ["get", "watch", "list"]
+              apiGroups: [""]
+              resources: ["pods"]
+          documentIndex: 0
+      - equal:
+          path: rules
+          value:
+            - verbs: ["get", "watch", "list"]
+              apiGroups: [""]
+              resources: ["pods"]
+          documentIndex: 1

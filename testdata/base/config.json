@@ -1,0 +1,4 @@
+{
+  "server-grpc-url": "grpc://octopus-file.com:8443",
+  "resource-monitor-period": 300000000000
+}

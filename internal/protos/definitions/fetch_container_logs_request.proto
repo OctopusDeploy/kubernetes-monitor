@@ -1,0 +1,15 @@
+syntax = "proto3";
+import "session_id.proto";
+import "cluster_id.proto";
+
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+message FetchContainerLogsRequest {
+  SessionId session_id = 1;
+  string namespace = 2;
+  string pod_name = 3;
+  string container_name = 4;
+  bool show_previous_container = 5;
+  ClusterId cluster_id = 6;
+}

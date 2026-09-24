@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+
+// Service to retrieve basic information about the gRPC service
+service InfoService {
+  rpc GetInfo (GetInfoRequest) returns (GetInfoResponse);
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  repeated HeaderEntry headers = 1;
+}
+
+message HeaderEntry{
+  string Key = 1;
+  string Value = 2;
+}

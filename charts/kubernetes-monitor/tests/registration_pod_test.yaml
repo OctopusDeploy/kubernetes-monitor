@@ -1,0 +1,65 @@
+suite: Test Registration Pod Secret References
+templates:
+  - registration-pod.yaml
+tests:
+  - it: "sets custom pod spec"
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      registration:
+        spec:
+          customKey: "custom-value"
+    asserts:
+      - equal:
+          path: spec.customKey
+          value: "custom-value"
+
+  - it: "sets custom container spec"
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      registration:
+        containers:
+          registration:
+            spec:
+              customKey: "custom-value"
+    asserts:
+      - equal:
+          path: spec.containers[0].customKey
+          value: "custom-value"
+
+  - it: "sets custom container env"
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      registration:
+        containers:
+          registration:
+            env:
+              - name: "custom-name"
+                value: "custom-value"
+    asserts:
+      - equal:
+          path: spec.containers[0].env[?(@.name=='custom-name')].value
+          value: "custom-value"
+
+  - it: "defaults to only scheduling onto Linux nodes, since the monitor image doesn't support Windows"
+    values:
+      - values/automatic_registration_base_values.yaml
+    asserts:
+      - equal:
+          path: spec.nodeSelector
+          value:
+            kubernetes.io/os: linux
+
+  - it: "allows the node selector to be overridden"
+    values:
+      - values/automatic_registration_base_values.yaml
+    set:
+      nodeSelector:
+        kubernetes.io/os: windows
+    asserts:
+      - equal:
+          path: spec.nodeSelector
+          value:
+            kubernetes.io/os: windows

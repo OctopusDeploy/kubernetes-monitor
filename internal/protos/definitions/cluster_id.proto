@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+// Machine ID in Octopus
+message ClusterId {
+  string value = 1;
+}

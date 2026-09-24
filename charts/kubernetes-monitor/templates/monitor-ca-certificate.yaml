@@ -1,0 +1,11 @@
+{{- if .Values.monitor.customCaCertificate -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "kubernetes-monitor.customCa.secretName"  . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "kubernetes-monitor.labels" . | nindent 4 }}
+data:
+  ca.crt: {{ .Values.monitor.customCaCertificate | quote }}
+{{- end }}

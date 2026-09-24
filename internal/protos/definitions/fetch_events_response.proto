@@ -1,0 +1,13 @@
+syntax = "proto3";
+import "session_id.proto";
+import "event.proto";
+import "error.proto";
+
+option csharp_namespace = "Octopus.Observability.MessageContracts";
+option go_package = "github.com/octopusdeploy/kubernetes-monitor/internal/protos";
+
+message FetchEventsResponse {
+  SessionId session_id = 1;
+  repeated Event events = 2;
+  optional Error error = 3;
+}

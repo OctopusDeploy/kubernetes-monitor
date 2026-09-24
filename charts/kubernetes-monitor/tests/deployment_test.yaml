@@ -1,0 +1,219 @@
+suite: Test Deployment
+templates:
+  - monitor-deployment.yaml
+tests:
+  - it: should have the correct image
+    chart:
+      appVersion: 1.1.1
+    asserts:
+      - isKind:
+          of: Deployment
+      - matchRegex:
+          path: metadata.name
+          pattern: kubernetes-monitor-chart$
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "docker.io/octopusdeploy/kubernetes-monitor:v1.1.1"
+
+  - it: "should use custom image repository and tag"
+    set:
+      image:
+        repository: "custom-image"
+        tag: "1.2.3"
+    asserts:
+      - equal:
+          path: "spec.template.spec.containers[0].image"
+          value: "docker.io/custom-image:1.2.3"
+
+  - it: "should add specified pod annotations"
+    set:
+      podAnnotations:
+        example.com/annotation: "value"
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["example.com/annotation"]
+          value: "value"
+
+  - it: "sets custom pod spec"
+    set:
+      monitor:
+        spec:
+          customKey: "custom-value"
+    asserts:
+      - equal:
+          path: spec.template.spec.customKey
+          value: "custom-value"
+
+  - it: "sets custom container spec"
+    set:
+      monitor:
+        containers:
+          monitor:
+            spec:
+              customKey: "custom-value"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].customKey
+          value: "custom-value"
+
+  - it: "does not set the DEBUG env var by default"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "DEBUG"
+            value: "true"
+
+  - it: "sets the DEBUG env var when debug is enabled"
+    set:
+      monitor:
+        debug: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "DEBUG"
+            value: "true"
+
+  - it: "does not set gRPC debug logging env vars by default"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "GRPC_GO_LOG_SEVERITY_LEVEL"
+            value: "info"
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "GODEBUG"
+            value: "http2debug=2"
+
+  - it: "sets gRPC debug logging env vars when enabled"
+    set:
+      monitor:
+        grpcDebugLogging: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "GRPC_GO_LOG_SEVERITY_LEVEL"
+            value: "info"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "GRPC_GO_LOG_VERBOSITY_LEVEL"
+            value: "99"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "GODEBUG"
+            value: "http2debug=2"
+
+  - it: "does not set the gRPC message size env vars by default, so the monitor uses its own defaults"
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=='MAX_GRPC_SEND_MESSAGE_SIZE_BYTES')]
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=='MAX_GRPC_RECEIVE_MESSAGE_SIZE_BYTES')]
+
+  - it: "sets both gRPC message size env vars"
+    set:
+      monitor:
+        maxGrpcSendMessageSizeBytes: 12345678
+        maxGrpcReceiveMessageSizeBytes: 987654321
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "MAX_GRPC_SEND_MESSAGE_SIZE_BYTES"
+            value: "12345678"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "MAX_GRPC_RECEIVE_MESSAGE_SIZE_BYTES"
+            value: "987654321"
+
+  - it: "does not set the gRPC compression env var by default, so compression stays on"
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=='DISABLE_GRPC_COMPRESSION')]
+
+  - it: "sets the gRPC compression env var when compression is disabled"
+    set:
+      monitor:
+        disableGrpcCompression: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "DISABLE_GRPC_COMPRESSION"
+            value: "true"
+
+  - it: "does not set the health check env vars by default, so the monitor uses its own defaults"
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=='HEALTH_CHECK_INTERVAL')]
+      - notExists:
+          path: spec.template.spec.containers[0].env[?(@.name=='HEALTH_CHECK_GIVE_UP_AFTER')]
+
+  - it: "sets both health check env vars"
+    set:
+      monitor:
+        healthCheck:
+          interval: "10s"
+          giveUpAfter: "2m"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "HEALTH_CHECK_INTERVAL"
+            value: "10s"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "HEALTH_CHECK_GIVE_UP_AFTER"
+            value: "2m"
+
+  # A zero interval disables the health check, so it has to reach the pod rather than be
+  # mistaken for an unset value and replaced by the monitor's default of 30 seconds.
+  - it: "sets the health check interval env var when the health check is disabled"
+    set:
+      monitor:
+        healthCheck:
+          interval: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: "HEALTH_CHECK_INTERVAL"
+            value: "0"
+
+  - it: "sets custom container env"
+    set:
+      monitor:
+        containers:
+          monitor:
+            env:
+              - name: "custom-name"
+                value: "custom-value"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].env[?(@.name=='custom-name')].value
+          value: "custom-value"
+
+  - it: "defaults to only scheduling onto Linux nodes, since the monitor image doesn't support Windows"
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            kubernetes.io/os: linux
+
+  - it: "allows the node selector to be overridden"
+    set:
+      nodeSelector:
+        kubernetes.io/os: windows
+    asserts:
+      - equal:
+          path: spec.template.spec.nodeSelector
+          value:
+            kubernetes.io/os: windows

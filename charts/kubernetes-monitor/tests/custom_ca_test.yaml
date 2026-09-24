@@ -1,0 +1,23 @@
+suite: Test custom CA certificate implementation
+templates:
+  - monitor-ca-certificate.yaml
+  - monitor-deployment.yaml
+tests:
+  - it: should have the correct CA certificate secret
+    set:
+      monitor:
+        # This is just a base64 encoded string to make sure we don't accidentally double-encode
+        customCaCertificate: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUYzekNDQThlZ=="
+    asserts:
+      - template: monitor-ca-certificate.yaml
+        equal:
+          path: data["ca.crt"]
+          value: "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUYzekNDQThlZ=="
+      - template: monitor-deployment.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[?(@.name=='CA_CERTIFICATE_PATH')].value
+          value: "/certs/ca.crt"
+      - template: monitor-deployment.yaml
+        equal:
+          path: spec.template.spec.volumes[?(@.name=='ca-certificate')].secret.secretName
+          value: "release-name-kubernetes-monitor-chart-custom-ca"

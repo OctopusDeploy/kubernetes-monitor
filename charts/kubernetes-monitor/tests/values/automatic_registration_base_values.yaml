@@ -1,0 +1,10 @@
+monitor:
+  serverGrpcUrl: "server-grpc-url"
+
+registration:
+  register: true
+  configurationStoreType: "kubernetes"
+  machineName: "machine-name"
+  spaceId: "spaces-1"
+  serverApiUrl: "api-url-here"
+  serverAccessToken: "access-token-here"

@@ -1,0 +1,163 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubernetes-monitor.fullname" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "kubernetes-monitor.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kubernetes-monitor.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kubernetes-monitor.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.monitor.spec }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kubernetes-monitor.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.monitor.customCaCertificate (not .Values.serviceAccount.automountServiceAccountToken) }}
+      volumes:
+        {{- if .Values.monitor.customCaCertificate }}
+        - name: ca-certificate
+          secret:
+            secretName: {{ include "kubernetes-monitor.customCa.secretName" . }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
+        {{- if not .Values.serviceAccount.automountServiceAccountToken }}
+        - name: kube-api-access
+          projected:
+            defaultMode: {{ .Values.serviceAccount.projectedVolumeDefaultMode | default 0444 }}
+            sources:
+              - serviceAccountToken:
+                  expirationSeconds: 86400
+                  path: token
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        apiVersion: v1
+                        fieldPath: metadata.namespace
+        {{- end }}
+      {{- end}}
+      containers:
+        - name: monitor
+          {{- with .Values.monitor.containers.monitor.spec }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: {{ include "kubernetes-monitor.fullImage" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if or .Values.monitor.customCaCertificate (not .Values.serviceAccount.automountServiceAccountToken) }}
+          volumeMounts:
+            {{- if .Values.monitor.customCaCertificate }}
+            - mountPath: /certs
+              name: ca-certificate
+            {{- end }}
+            {{- if not .Values.serviceAccount.automountServiceAccountToken }}
+            - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+              name: kube-api-access
+              readOnly: true
+            {{- end }}
+          {{- end}}
+          envFrom:
+            - secretRef:
+                name: {{ include "kubernetes-monitor.authentication.secretName"  . }}
+          env:
+            - name: "SERVER_GRPC_URL"
+              value: "{{ .Values.monitor.serverGrpcUrl}}"
+            {{- if .Values.monitor.serverThumbprint }}
+            - name: "SERVER_THUMBPRINT"
+              value: "{{ .Values.monitor.serverThumbprint}}"
+            {{- end}}
+            {{- if .Values.monitor.customCaCertificate }}
+            - name: "CA_CERTIFICATE_PATH"
+              value: "/certs/ca.crt"
+            {{- end}}
+            {{- if .Values.global.targetNamespaces }}
+            - name: "TARGET_NAMESPACES"
+              value: {{ join "," .Values.global.targetNamespaces | quote }}
+            {{- if .Values.monitor.clusterScopedResources }}
+            - name: "CLUSTER_SCOPED_RESOURCES"
+              value: "true"
+            {{- end}}
+            {{- end}}
+            {{- if .Values.monitor.maxGrpcSendMessageSizeBytes }}
+            - name: "MAX_GRPC_SEND_MESSAGE_SIZE_BYTES"
+              value: "{{ int64 .Values.monitor.maxGrpcSendMessageSizeBytes }}"
+            {{- end}}
+            {{- if .Values.monitor.maxGrpcReceiveMessageSizeBytes }}
+            - name: "MAX_GRPC_RECEIVE_MESSAGE_SIZE_BYTES"
+              value: "{{ int64 .Values.monitor.maxGrpcReceiveMessageSizeBytes }}"
+            {{- end}}
+            {{- if ne (toString .Values.monitor.healthCheck.interval) "" }}
+            - name: "HEALTH_CHECK_INTERVAL"
+              value: "{{ .Values.monitor.healthCheck.interval }}"
+            {{- end}}
+            {{- if ne (toString .Values.monitor.healthCheck.giveUpAfter) "" }}
+            - name: "HEALTH_CHECK_GIVE_UP_AFTER"
+              value: "{{ .Values.monitor.healthCheck.giveUpAfter }}"
+            {{- end}}
+            {{- if .Values.monitor.disableGrpcCompression }}
+            - name: "DISABLE_GRPC_COMPRESSION"
+              value: "true"
+            {{- end}}
+            {{- if .Values.monitor.debug }}
+            - name: "DEBUG"
+              value: "true"
+            {{- end}}
+            {{- if .Values.monitor.grpcDebugLogging }}
+            - name: "GRPC_GO_LOG_SEVERITY_LEVEL"
+              value: "info"
+            - name: "GRPC_GO_LOG_VERBOSITY_LEVEL"
+              value: "99"
+            - name: "GODEBUG"
+              value: "http2debug=2"
+            {{- end}}
+            {{- with .Values.monitor.containers.monitor.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

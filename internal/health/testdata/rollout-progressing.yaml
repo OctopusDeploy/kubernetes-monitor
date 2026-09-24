@@ -1,0 +1,29 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: test-rollout
+  namespace: default
+  generation: 1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: test-rollout
+  template:
+    metadata:
+      labels:
+        app: test-rollout
+    spec:
+      containers:
+        - name: test
+          image: test:v2
+status:
+  availableReplicas: 1
+  currentPodHash: def456
+  message: "more replicas need to be updated"
+  observedGeneration: "abc123"
+  phase: Progressing
+  readyReplicas: 1
+  replicas: 2
+  stableRS: abc123
+  updatedReplicas: 1

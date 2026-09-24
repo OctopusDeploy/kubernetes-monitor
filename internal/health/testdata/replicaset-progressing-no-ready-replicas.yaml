@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  annotations:
+    deployment.kubernetes.io/desired-replicas: "1"
+    deployment.kubernetes.io/max-replicas: "2"
+    deployment.kubernetes.io/revision: "1"
+  creationTimestamp: "2025-03-18T06:30:58Z"
+  generation: 1
+  labels:
+    app: guestbook-ui
+    pod-template-hash: 5fbf7fddd6
+  name: guestbook-ui-5fbf7fddd6
+  namespace: guestbook-projects-141-development
+  ownerReferences:
+  - apiVersion: apps/v1
+    blockOwnerDeletion: true
+    controller: true
+    kind: Deployment
+    name: guestbook-ui
+    uid: fbc83f7f-52c3-4237-8acf-e6116bc88bfe
+  resourceVersion: "3833361"
+  uid: 9dd216ee-a198-4718-b00a-d9ae1cff5a8c
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: guestbook-ui
+      pod-template-hash: 5fbf7fddd6
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: guestbook-ui
+        pod-template-hash: 5fbf7fddd6
+    spec:
+      containers:
+      - image: gcr.io/heptio-images/ks-guestbook-demo:0.2
+        imagePullPolicy: IfNotPresent
+        name: guestbook-ui
+        ports:
+        - containerPort: 80
+          protocol: TCP
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+status:
+  availableReplicas: 1
+  fullyLabeledReplicas: 1
+  observedGeneration: 1
+  readyReplicas: 0
+  replicas: 3
