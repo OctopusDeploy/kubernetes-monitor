@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	dario.cat/mergo v1.0.2
-	github.com/OctopusDeploy/go-octopusdeploy/v2 v2.111.0
+	github.com/OctopusDeploy/go-octopusdeploy/v2 v2.118.0
 	github.com/OctopusDeploy/octopus-grpc/go v0.5.1
 	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.0-rc1
 	github.com/argoproj/argo-cd/v3 v3.6.0-rc1
