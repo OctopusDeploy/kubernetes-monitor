@@ -98,7 +98,7 @@ func (c *CommandHandler) StartSubscriber() {
 	}
 }
 
-// receive reads from the stream until it errors. It returns true if the stream was restarted and
+// receive reads from the stream until the stream errors. It returns true if the stream was restarted and
 // receiving should continue, or false if the subscriber should stop.
 func (c *CommandHandler) receive() bool {
 	for {
