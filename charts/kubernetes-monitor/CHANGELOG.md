@@ -1,16 +1,15 @@
 # Changelog
 
-## Earlier releases
-
-These entries preserve the release history before the public repository was created.
-Links to private commits and pull requests have been omitted; version numbers are unchanged.
-
 ## [0.43.0](https://github.com/OctopusDeploy/kubernetes-monitor/compare/kubernetes-monitor-chart-v0.42.0...kubernetes-monitor-chart-v0.43.0) (2026-09-24)
 
 
 ### Features
 
 * **main:** release 0.31.2 ([#3](https://github.com/OctopusDeploy/kubernetes-monitor/issues/3)) ([340f5a8](https://github.com/OctopusDeploy/kubernetes-monitor/commit/340f5a8e87e256e0f638b60032ae13874d44020e))
+
+## Earlier releases
+
+These entries preserve the release history before the public repository was created.
 
 ## 0.42.0 (2026-09-24)
 
