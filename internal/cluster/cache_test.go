@@ -1,14 +1,13 @@
 package cluster
 
 import (
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/kube"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 
@@ -17,12 +16,12 @@ import (
 	"github.com/octopusdeploy/kubernetes-monitor/internal/kubernetes"
 )
 
-func TestOnPopulateResourceInfoHandler_CachesManifest_ForDesiredResource(t *testing.T) {
-	obj := kubernetes.NewUnstructuredBuilder().
+func newTestPod(name string, ownerRefs ...v1.OwnerReference) *unstructured.Unstructured {
+	builder := kubernetes.NewUnstructuredBuilder().
 		WithAPIVersion("v1").
 		WithKind("Pod").
 		WithNamespace("default").
-		WithName("test").
+		WithName(name).
 		WithSpec(map[string]interface{}{
 			"containers": []interface{}{
 				map[string]interface{}{
@@ -30,32 +29,36 @@ func TestOnPopulateResourceInfoHandler_CachesManifest_ForDesiredResource(t *test
 					"image": "nginx",
 				},
 			},
-		}).
-		Build()
+		})
+	for _, ownerRef := range ownerRefs {
+		builder = builder.WithOwnerReference(ownerRef)
+	}
+	return builder.Build()
+}
 
-	desiredResource := NewDesiredResourceBuilder().
-		WithKind(obj.GetKind()).
-		WithNamespace(obj.GetNamespace()).
-		WithName(obj.GetName()).
-		WithApiVersion(obj.GetAPIVersion()).
-		WithManifest(obj).
-		Build()
+func newTestResourceInterests(t *testing.T, keys ...kube.ResourceKey) *resourceInterests {
+	t.Helper()
+	interests := newResourceInterests(t.Context(), discardLogger())
+	keySet := map[kube.ResourceKey]struct{}{}
+	for _, key := range keys {
+		keySet[key] = struct{}{}
+	}
+	if err := interests.set(t.Context(), testClusterId, keySet); err != nil {
+		t.Fatalf("setting interests: %v", err)
+	}
+	return interests
+}
 
-	applicationInstance := NewApplicationInstanceBuilder().
-		WithDesiredResources([]*DesiredResource{&desiredResource}).
-		Build()
-
-	applicationInstanceList := NewApplicationInstanceList()
-	applicationInstanceList.UpsertApplicationInstance(&applicationInstance)
-
-	onPopulateResourceInfoHandlerFunc := onPopulateResourceInfoHandler(applicationInstanceList)
+func TestPopulateResourceInfo_CachesManifest_ForDesiredResource(t *testing.T) {
+	obj := newTestPod("test")
+	interests := newTestResourceInterests(t, kube.GetResourceKey(obj))
 
 	expectedInfo := ResourceInfo{
 		ResourceKey: kube.GetResourceKey(obj),
 		OwnerRefs:   []v1.OwnerReference{{}},
 	}
 
-	info, keep := onPopulateResourceInfoHandlerFunc(obj, true)
+	info, keep := interests.populateResourceInfo(obj, true)
 
 	if diff := cmp.Diff(expectedInfo, info); diff != "" {
 		t.Error(diff)
@@ -66,10 +69,10 @@ func TestOnPopulateResourceInfoHandler_CachesManifest_ForDesiredResource(t *test
 	}
 }
 
-func TestOnPopulateResourceInfoHandler_CachesManifest_ForChildrenDesiredResource(t *testing.T) {
+func TestPopulateResourceInfo_CachesManifest_ForChildrenOfTrackedResource(t *testing.T) {
 	parentObj := kubernetes.NewUnstructuredBuilder().
 		WithUID(types.UID(uuid.New().String())).
-		WithAPIVersion("v1").
+		WithAPIVersion("apps/v1").
 		WithKind("Deployment").
 		WithNamespace("default").
 		WithName("test-deployment").
@@ -82,51 +85,16 @@ func TestOnPopulateResourceInfoHandler_CachesManifest_ForChildrenDesiredResource
 		UID:        parentObj.GetUID(),
 	}
 
-	childObj := kubernetes.NewUnstructuredBuilder().
-		WithAPIVersion("v1").
-		WithKind("Pod").
-		WithNamespace("default").
-		WithName("test").
-		WithSpec(map[string]interface{}{
-			"containers": []interface{}{
-				map[string]interface{}{
-					"name":  "example-container",
-					"image": "nginx",
-				},
-			},
-		}).
-		WithOwnerReference(parentOwnerRef).
-		Build()
+	childObj := newTestPod("test", parentOwnerRef)
 
-	desiredResource := NewDesiredResourceBuilder().
-		WithKind(parentObj.GetKind()).
-		WithNamespace(parentObj.GetNamespace()).
-		WithName(parentObj.GetName()).
-		WithApiVersion(parentObj.GetAPIVersion()).
-		WithManifest(parentObj).
-		Build()
-
-	presentMonitoredResource := NewPresentMonitoredResourceBuilder().
-		ForDesiredResource(desiredResource).
-		WithUID(parentObj.GetUID()).
-		Build()
-
-	applicationInstance := NewApplicationInstanceBuilder().
-		WithDesiredResources([]*DesiredResource{&desiredResource}).
-		WithPresentMonitoredResources([]*PresentMonitoredResource{&presentMonitoredResource}).
-		Build()
-
-	applicationInstanceList := NewApplicationInstanceList()
-	applicationInstanceList.UpsertApplicationInstance(&applicationInstance)
-
-	onPopulateResourceInfoHandlerFunc := onPopulateResourceInfoHandler(applicationInstanceList)
+	interests := newTestResourceInterests(t, kube.GetResourceKey(parentObj))
 
 	expectedParentInfo := ResourceInfo{
 		ResourceKey: kube.GetResourceKey(parentObj),
 		OwnerRefs:   []v1.OwnerReference{{}},
 	}
 
-	info, keep := onPopulateResourceInfoHandlerFunc(parentObj, true)
+	info, keep := interests.populateResourceInfo(parentObj, true)
 
 	if diff := cmp.Diff(expectedParentInfo, info); diff != "" {
 		t.Error(diff)
@@ -140,7 +108,7 @@ func TestOnPopulateResourceInfoHandler_CachesManifest_ForChildrenDesiredResource
 		OwnerRefs:   []v1.OwnerReference{parentOwnerRef},
 	}
 
-	info, keep = onPopulateResourceInfoHandlerFunc(childObj, false)
+	info, keep = interests.populateResourceInfo(childObj, false)
 
 	if diff := cmp.Diff(expectedChildInfo, info); diff != "" {
 		t.Error(diff)
@@ -148,40 +116,28 @@ func TestOnPopulateResourceInfoHandler_CachesManifest_ForChildrenDesiredResource
 	if !keep {
 		t.Error("Expected to cache child object, but discarded")
 	}
+
+	// The child inherits its owner's interest, so its own children are recognised during the same listing.
+	grandchildObj := newTestPod("grandchild", v1.OwnerReference{
+		APIVersion: childObj.GetAPIVersion(),
+		Kind:       childObj.GetKind(),
+		Name:       childObj.GetName(),
+	})
+	if _, keep := interests.populateResourceInfo(grandchildObj, false); !keep {
+		t.Error("Expected to cache grandchild object, but discarded")
+	}
 }
 
-func TestOnPopulateResourceInfoHandler_DoesNotCacheManifest_ForUndesiredResources(t *testing.T) {
-	t.Skip("We are currently caching manifests for all resources intentionally")
-
-	obj := kubernetes.NewUnstructuredBuilder().
-		WithAPIVersion("v1").
-		WithKind("Pod").
-		WithNamespace("default").
-		WithName("test").
-		WithSpec(map[string]interface{}{
-			"containers": []interface{}{
-				map[string]interface{}{
-					"name":  "example-container",
-					"image": "nginx",
-				},
-			},
-		}).
-		Build()
-
-	applicationInstance := NewApplicationInstanceBuilder().
-		Build()
-
-	applicationInstanceList := NewApplicationInstanceList()
-	applicationInstanceList.UpsertApplicationInstance(&applicationInstance)
-
-	onPopulateResourceInfoHandlerFunc := onPopulateResourceInfoHandler(applicationInstanceList)
+func TestPopulateResourceInfo_DoesNotCacheManifest_ForUntrackedRootResource(t *testing.T) {
+	obj := newTestPod("test")
+	interests := newTestResourceInterests(t)
 
 	expectedInfo := ResourceInfo{
 		ResourceKey: kube.GetResourceKey(obj),
 		OwnerRefs:   []v1.OwnerReference{{}},
 	}
 
-	info, keep := onPopulateResourceInfoHandlerFunc(obj, true)
+	info, keep := interests.populateResourceInfo(obj, true)
 
 	if diff := cmp.Diff(expectedInfo, info); diff != "" {
 		t.Error(diff)
@@ -192,24 +148,23 @@ func TestOnPopulateResourceInfoHandler_DoesNotCacheManifest_ForUndesiredResource
 }
 
 func TestNewCache_NilClientset_SkipsPermissionFilter(t *testing.T) {
-	applicationInstances := NewApplicationInstanceList()
-	c, filter, err := NewCache(
+	c, filter, err := newCache(
 		t.Context(),
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		discardLogger(),
 		&rest.Config{Host: "http://example.invalid"},
 		nil,
-		applicationInstances,
+		newResourceInterests(t.Context(), discardLogger()),
 		nil,
 		false,
 		time.Minute,
 	)
 	if err != nil {
-		t.Fatalf("NewCache returned error: %v", err)
+		t.Fatalf("newCache returned error: %v", err)
 	}
 	if c == nil {
-		t.Fatal("NewCache returned nil cache")
+		t.Fatal("newCache returned nil cache")
 	}
 	if filter != nil {
-		t.Error("NewCache should return nil ResourceFilter when clientset is nil")
+		t.Error("newCache should return nil ResourceFilter when clientset is nil")
 	}
 }

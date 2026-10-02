@@ -19,8 +19,12 @@ go test -tags=memory_profile -timeout=60m \
 ```
 
 Each scenario creates deployments in a KWOK cluster, seeds some of them as
-desired resources, and calls `cluster.Cluster.Sync()` to exercise the real
-gitops-engine cluster cache.
+desired resources, and syncs the real gitops-engine cluster cache through a
+`cluster.ClusterList`, the way the monitor does.
+
+`TestCacheMemoryProfile_500Targets` reproduces a single monitor serving 500
+Octopus machines that all point at the same cluster: it splits the desired
+deployments across 500 targets, which share one cluster cache.
 
 If Pyroscope is reachable at `memTestPyroscopeURL` (currently
 `http://localhost:5053`), heap samples are shipped there, tagged with the
@@ -29,8 +33,8 @@ test name and scenario parameters. Otherwise, pprof heap dumps go to
 
 When Pyroscope is up, each test logs a Grafana Explore link
 (`http://localhost:5054`) pre-filtered to that run's `test` label. The
-profile is also tagged with `deployments`, `replicas`, `desired_pct`, and
-`phase` for ad-hoc filtering.
+profile is also tagged with `deployments`, `replicas`, `desired_pct`, `targets`
+and `phase` for ad-hoc filtering.
 
 To add a new scenario, copy one of the existing `TestCacheMemoryProfile_*`
 functions and change the `memTestConfig` values.

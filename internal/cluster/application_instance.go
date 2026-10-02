@@ -14,7 +14,6 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/octopusdeploy/kubernetes-monitor/internal/crypto"
-	"github.com/octopusdeploy/kubernetes-monitor/internal/utilities"
 )
 
 type (
@@ -22,17 +21,18 @@ type (
 	Version               string
 )
 
+// ApplicationInstance is owned by its target's goroutine, so it isn't safe for concurrent use.
 type ApplicationInstance struct {
 	ApplicationInstanceId     ApplicationInstanceId
 	hashSalt                  crypto.HashSalt
-	desiredResources          *utilities.ConcurrentMap[kube.ResourceKey, *DesiredResource]
-	presentMonitoredResources *utilities.ConcurrentMap[DesiredResourceId, *PresentMonitoredResource]
-	childMonitoredResources   *utilities.ConcurrentMap[kube.ResourceKey, *ChildMonitoredResource]
-	missingMonitoredResources *utilities.ConcurrentMap[DesiredResourceId, *MissingMonitoredResource]
-	unknownMonitoredResources *utilities.ConcurrentMap[DesiredResourceId, *UnknownMonitoredResource]
+	desiredResources          map[kube.ResourceKey]*DesiredResource
+	presentMonitoredResources map[DesiredResourceId]*PresentMonitoredResource
+	childMonitoredResources   map[kube.ResourceKey]*ChildMonitoredResource
+	missingMonitoredResources map[DesiredResourceId]*MissingMonitoredResource
+	unknownMonitoredResources map[DesiredResourceId]*UnknownMonitoredResource
 
 	// Resource keys that are in presentMonitoredResources and childMonitoredResources
-	trackedResourceKeys *utilities.ConcurrentMap[kube.ResourceKey, bool]
+	trackedResourceKeys map[kube.ResourceKey]struct{}
 }
 
 // NewApplicationInstance safely constructs ApplicationInstances
@@ -40,14 +40,12 @@ func NewApplicationInstance(id ApplicationInstanceId, hashSalt crypto.HashSalt) 
 	return &ApplicationInstance{
 		ApplicationInstanceId:     id,
 		hashSalt:                  hashSalt,
-		desiredResources:          utilities.NewConcurrentMap[kube.ResourceKey, *DesiredResource](),
-		presentMonitoredResources: utilities.NewConcurrentMap[DesiredResourceId, *PresentMonitoredResource](),
-		childMonitoredResources:   utilities.NewConcurrentMap[kube.ResourceKey, *ChildMonitoredResource](),
-		missingMonitoredResources: utilities.NewConcurrentMap[DesiredResourceId, *MissingMonitoredResource](),
-		unknownMonitoredResources: utilities.NewConcurrentMap[DesiredResourceId, *UnknownMonitoredResource](),
-
-		// Resource keys that are in presentMonitoredResources and childMonitoredResources
-		trackedResourceKeys: utilities.NewConcurrentMap[kube.ResourceKey, bool](),
+		desiredResources:          map[kube.ResourceKey]*DesiredResource{},
+		presentMonitoredResources: map[DesiredResourceId]*PresentMonitoredResource{},
+		childMonitoredResources:   map[kube.ResourceKey]*ChildMonitoredResource{},
+		missingMonitoredResources: map[DesiredResourceId]*MissingMonitoredResource{},
+		unknownMonitoredResources: map[DesiredResourceId]*UnknownMonitoredResource{},
+		trackedResourceKeys:       map[kube.ResourceKey]struct{}{},
 	}
 }
 
@@ -62,11 +60,8 @@ func (a *ApplicationInstance) MergeDesiredResources(
 
 	// Desired resources should be additively updated unless we get an explicit command to remove some
 	for key, desiredResource := range desiredResources {
-		a.unknownMonitoredResources.Set(
-			desiredResource.Id,
-			NewUnknownMonitoredResource(clusterId, desiredResource, ""),
-		)
-		a.desiredResources.Set(key, desiredResource)
+		a.unknownMonitoredResources[desiredResource.Id] = NewUnknownMonitoredResource(clusterId, desiredResource, "")
+		a.desiredResources[key] = desiredResource
 	}
 }
 
@@ -78,7 +73,7 @@ func (a *ApplicationInstance) ReplaceDesiredResources(
 	defer span.End()
 	span.SetAttributes(attribute.String("applicationInstanceId", string(a.ApplicationInstanceId)))
 
-	a.desiredResources.ReplaceAll(desiredResources)
+	a.desiredResources = maps.Clone(desiredResources)
 
 	// Every monitored resource describes the set being replaced, so none of them carry over.
 	// Set everything to unknown until a rescan resolves it
@@ -93,30 +88,17 @@ func (a *ApplicationInstance) ReplaceDesiredResources(
 // DeleteDesiredResourcesExceptForVersion removes desired resources in place that are not related to the
 // provided version
 func (a *ApplicationInstance) DeleteDesiredResourcesExceptForVersion(versionToKeep Version) {
-	a.desiredResources.Iterate(func(key kube.ResourceKey, resource *DesiredResource) bool {
-		if resource.Version == nil {
-			return true
-		}
-
-		if *resource.Version != versionToKeep {
-			a.desiredResources.Remove(key)
-		}
-		return true
+	maps.DeleteFunc(a.desiredResources, func(_ kube.ResourceKey, resource *DesiredResource) bool {
+		return resource.Version != nil && *resource.Version != versionToKeep
 	})
 }
 
 // DeleteDesiredResources removes only the listed desired resource IDs from the in-memory desired
 // resource map, leaving all others untouched
 func (a *ApplicationInstance) DeleteDesiredResources(resourceIds []DesiredResourceId) {
-	for _, id := range resourceIds {
-		a.desiredResources.Iterate(func(key kube.ResourceKey, resource *DesiredResource) bool {
-			if resource.Id == id {
-				a.desiredResources.Remove(key)
-				return false
-			}
-			return true
-		})
-	}
+	maps.DeleteFunc(a.desiredResources, func(_ kube.ResourceKey, resource *DesiredResource) bool {
+		return slices.Contains(resourceIds, resource.Id)
+	})
 }
 
 func (a *ApplicationInstance) GetParentResourceId(resourceInfo ResourceInfo) types.UID {
@@ -133,16 +115,13 @@ func (a *ApplicationInstance) GetParentResourceId(resourceInfo ResourceInfo) typ
 
 		// Sometimes the owner is not correctly referenced, so we've filled in the resource information instead
 		// In this case, we check if we know about the owner based off the resource key and grab the ID from there
-		desiredResource, found := a.desiredResources.Get(ownerResourceKey)
-		if found {
-			resource, found := a.presentMonitoredResources.Get(desiredResource.Id)
-			if found {
+		if desiredResource, found := a.desiredResources[ownerResourceKey]; found {
+			if resource, found := a.presentMonitoredResources[desiredResource.Id]; found {
 				return resource.ResourceId
 			}
 		}
 
-		resource, found := a.childMonitoredResources.Get(ownerResourceKey)
-		if found {
+		if resource, found := a.childMonitoredResources[ownerResourceKey]; found {
 			return resource.ResourceId
 		}
 	}
@@ -152,15 +131,7 @@ func (a *ApplicationInstance) GetParentResourceId(resourceInfo ResourceInfo) typ
 
 // GetRootParentResource recursively searches for the top level ownerId for the child resource provided.
 func (a *ApplicationInstance) GetRootParentResource(ownerId types.UID) types.UID {
-	a.childMonitoredResources.Iterate(func(_ kube.ResourceKey, possibleParentResource *ChildMonitoredResource) bool {
-		if ownerId == possibleParentResource.ResourceId {
-			ownerId = a.GetRootParentResource(possibleParentResource.OwnerId)
-			return false
-		}
-		return true
-	})
-
-	return ownerId
+	return getRootParentResource(ownerId, a.childMonitoredResources)
 }
 
 // GetChangesForUpdatedResource generates a changeset for a single resource change event and updates
@@ -194,7 +165,7 @@ func (a *ApplicationInstance) GetChangesForUpdatedResource(
 	// Move missing resource to present resource
 	case OnResourceUpdatedDesiredResourceFound:
 		span.AddEvent("OnResourceUpdatedDesiredResourceFound")
-		desiredResource, _ := a.desiredResources.Get(newRes.Info.(ResourceInfo).ResourceKey)
+		desiredResource := a.desiredResources[newRes.Info.(ResourceInfo).ResourceKey]
 		updatedPresentMonitoredResources[desiredResource.Id], err = NewPresentMonitoredResource(
 			clusterId,
 			newRes,
@@ -209,7 +180,7 @@ func (a *ApplicationInstance) GetChangesForUpdatedResource(
 		// Update existing present resource
 	case OnResourceUpdatedDesiredResourceUpdated:
 		span.AddEvent("OnResourceUpdatedDesiredResourceUpdated")
-		desiredResource, _ := a.desiredResources.Get(newRes.Info.(ResourceInfo).ResourceKey)
+		desiredResource := a.desiredResources[newRes.Info.(ResourceInfo).ResourceKey]
 		updatedPresentMonitoredResources[desiredResource.Id], err = NewPresentMonitoredResource(
 			clusterId,
 			newRes,
@@ -223,8 +194,7 @@ func (a *ApplicationInstance) GetChangesForUpdatedResource(
 	// Move present resource to missing resource
 	case OnResourceUpdatedDesiredResourceRemoved:
 		span.AddEvent("OnResourceUpdatedDesiredResourceRemoved")
-		desiredResource, _ := a.desiredResources.Get(oldRes.Info.(ResourceInfo).ResourceKey)
-		delete(updatedMissingMonitoredResources, desiredResource.Id)
+		desiredResource := a.desiredResources[oldRes.Info.(ResourceInfo).ResourceKey]
 		updatedMissingMonitoredResources[desiredResource.Id] = NewMissingMonitoredResource(clusterId, desiredResource)
 
 		a.deletePresentMonitoredResource(desiredResource.Id)
@@ -279,16 +249,19 @@ func (a *ApplicationInstance) GetChangesForUpdatedResource(
 // ReplaceMonitoredResourcesFromCluster associates the DesiredResources from this ApplicationInstance and
 // queries for related MonitoredResources in the provided cluster
 // Results will be updated in the internal state of the ApplicationInstance
-func (a *ApplicationInstance) ReplaceMonitoredResourcesFromCluster(ctx context.Context, cluster *Cluster) error {
+func (a *ApplicationInstance) ReplaceMonitoredResourcesFromCluster(
+	ctx context.Context, clusterId ClusterId, cluster *sharedCluster,
+) error {
 	// Try to periodically resolve any namespaces that we weren't able to previously.
 	// discoveryHealthy gates whether a resource whose type is absent from discovery may be
 	// reported Missing (its CRD was deleted) versus kept Unknown (discovery only partially
 	// succeeded, so absence isn't conclusive).
-	namespacedMap, discoveryHealthy := cluster.GetNamespaceMapWithHealth(ctx)
+	namespacedMap, discoveryHealthy := cluster.namespaceMapWithHealth(ctx)
 	a.resolveNamespaces(namespacedMap)
 
 	present, child, missing, unknown, err := cluster.getMonitoredResources(
-		a.desiredResources.GetAsMap(),
+		clusterId,
+		a.desiredResources,
 		a.hashSalt,
 		discoveryHealthy,
 	)
@@ -306,25 +279,18 @@ func (a *ApplicationInstance) replaceMonitoredResources(
 	missingMonitoredResources map[DesiredResourceId]*MissingMonitoredResource,
 	unknownMonitoredResources map[DesiredResourceId]*UnknownMonitoredResource,
 ) {
-	a.presentMonitoredResources.ReplaceAll(presentMonitoredResources)
-	a.childMonitoredResources.ReplaceAll(childMonitoredResources)
-	a.missingMonitoredResources.ReplaceAll(missingMonitoredResources)
-	a.unknownMonitoredResources.ReplaceAll(unknownMonitoredResources)
+	a.presentMonitoredResources = nonNil(presentMonitoredResources)
+	a.childMonitoredResources = nonNil(childMonitoredResources)
+	a.missingMonitoredResources = nonNil(missingMonitoredResources)
+	a.unknownMonitoredResources = nonNil(unknownMonitoredResources)
 
-	trackedResourceKeys := map[kube.ResourceKey]bool{}
-	a.presentMonitoredResources.Iterate(func(
-		_ DesiredResourceId, presentMonitoredResource *PresentMonitoredResource,
-	) bool {
-		trackedResourceKeys[presentMonitoredResource.ResourceKey()] = true
-		return true
-	})
-
-	a.childMonitoredResources.Iterate(func(_ kube.ResourceKey, childMonitoredResource *ChildMonitoredResource) bool {
-		trackedResourceKeys[childMonitoredResource.ResourceKey()] = true
-		return true
-	})
-
-	a.trackedResourceKeys.ReplaceAll(trackedResourceKeys)
+	a.trackedResourceKeys = map[kube.ResourceKey]struct{}{}
+	for _, presentMonitoredResource := range a.presentMonitoredResources {
+		a.trackedResourceKeys[presentMonitoredResource.ResourceKey()] = struct{}{}
+	}
+	for _, childMonitoredResource := range a.childMonitoredResources {
+		a.trackedResourceKeys[childMonitoredResource.ResourceKey()] = struct{}{}
+	}
 }
 
 // MonitoredResourceChanges snapshots every monitored resource the application instance holds as the
@@ -333,10 +299,10 @@ func (a *ApplicationInstance) MonitoredResourceChanges(clusterId ClusterId) *App
 	return &ApplicationInstanceChanges{
 		ApplicationInstanceId:     a.ApplicationInstanceId,
 		ClusterId:                 clusterId,
-		PresentMonitoredResources: a.presentMonitoredResources.GetAll(),
-		ChildMonitoredResources:   a.childMonitoredResources.GetAll(),
-		MissingMonitoredResources: a.missingMonitoredResources.GetAll(),
-		UnknownMonitoredResources: a.unknownMonitoredResources.GetAll(),
+		PresentMonitoredResources: slices.Collect(maps.Values(a.presentMonitoredResources)),
+		ChildMonitoredResources:   slices.Collect(maps.Values(a.childMonitoredResources)),
+		MissingMonitoredResources: slices.Collect(maps.Values(a.missingMonitoredResources)),
+		UnknownMonitoredResources: slices.Collect(maps.Values(a.unknownMonitoredResources)),
 	}
 }
 
@@ -349,20 +315,18 @@ func (a *ApplicationInstance) ResolveNamespaces(namespacedMap map[v1.TypeMeta]bo
 func (a *ApplicationInstance) resolveNamespaces(namespacedMap map[v1.TypeMeta]bool) bool {
 	allResourcesFound := true
 
-	a.desiredResources.Iterate(func(key kube.ResourceKey, desiredResource *DesiredResource) bool {
+	// Resolving a namespace can change a resource's key, so rebuild the map rather than editing it in place.
+	resolved := make(map[kube.ResourceKey]*DesiredResource, len(a.desiredResources))
+	for key, desiredResource := range a.desiredResources {
 		if !desiredResource.ResolveNamespace(namespacedMap) {
 			allResourcesFound = false
-			return true
+			resolved[key] = desiredResource
+			continue
 		}
 
-		updatedResourceKey := desiredResource.ResourceKey()
-		if key != updatedResourceKey {
-			a.desiredResources.Remove(key)
-		}
-		a.desiredResources.Set(updatedResourceKey, desiredResource)
-
-		return true
-	})
+		resolved[desiredResource.ResourceKey()] = desiredResource
+	}
+	a.desiredResources = resolved
 
 	return allResourcesFound
 }
@@ -396,37 +360,37 @@ func (a *ApplicationInstance) calculateResourceChange(
 	var oldResourceDesired *DesiredResource
 
 	if newRes != nil {
-		newResourceDesired, _ = a.desiredResources.Get(newRes.Info.(ResourceInfo).ResourceKey)
+		newResourceDesired = a.desiredResources[newRes.Info.(ResourceInfo).ResourceKey]
 	}
 
 	if oldRes != nil {
-		oldResourceDesired, _ = a.desiredResources.Get(oldRes.Info.(ResourceInfo).ResourceKey)
+		oldResourceDesired = a.desiredResources[oldRes.Info.(ResourceInfo).ResourceKey]
 	}
 
 	if newResourceDesired != nil {
-		if _, ok := a.missingMonitoredResources.Get(newResourceDesired.Id); ok {
+		if _, ok := a.missingMonitoredResources[newResourceDesired.Id]; ok {
 			return OnResourceUpdatedDesiredResourceFound
 		}
 
-		if _, ok := a.presentMonitoredResources.Get(newResourceDesired.Id); ok {
+		if _, ok := a.presentMonitoredResources[newResourceDesired.Id]; ok {
 			return OnResourceUpdatedDesiredResourceUpdated
 		}
 	}
 
 	if newRes != nil {
-		if _, ok := a.childMonitoredResources.Get(newRes.Info.(ResourceInfo).ResourceKey); ok {
+		if _, ok := a.childMonitoredResources[newRes.Info.(ResourceInfo).ResourceKey]; ok {
 			return OnResourceUpdatedChildResourceUpdated
 		}
 	}
 
 	if oldResourceDesired != nil {
-		if _, ok := a.presentMonitoredResources.Get(oldResourceDesired.Id); ok {
+		if _, ok := a.presentMonitoredResources[oldResourceDesired.Id]; ok {
 			return OnResourceUpdatedDesiredResourceRemoved
 		}
 	}
 
 	if oldRes != nil {
-		if _, ok := a.childMonitoredResources.Get(oldRes.Info.(ResourceInfo).ResourceKey); ok {
+		if _, ok := a.childMonitoredResources[oldRes.Info.(ResourceInfo).ResourceKey]; ok {
 			return OnResourceUpdatedChildResourceRemoved
 		}
 	}
@@ -439,7 +403,7 @@ func (a *ApplicationInstance) calculateResourceChange(
 				continue
 			}
 
-			if _, ok := a.trackedResourceKeys.Get(ownerResourceKey); ok {
+			if _, ok := a.trackedResourceKeys[ownerResourceKey]; ok {
 				return OnResourceUpdatedChildResourceFound
 			}
 		}
@@ -448,40 +412,56 @@ func (a *ApplicationInstance) calculateResourceChange(
 	return OnResourceUpdatedNoChange
 }
 
-// Getters and setters, you can expose unexposed methods if needed - just be sure to consider locking
-
 // GetDesiredResources returns a slice of all desired resources
 func (a *ApplicationInstance) GetDesiredResources() []*DesiredResource {
-	return a.desiredResources.GetAll()
+	return slices.Collect(maps.Values(a.desiredResources))
+}
+
+func (a *ApplicationInstance) addResourceKeysOfInterest(keys map[kube.ResourceKey]struct{}) {
+	for key, desiredResource := range a.desiredResources {
+		keys[key] = struct{}{}
+		keys[desiredResource.ResourceKey()] = struct{}{}
+	}
+	for key := range a.trackedResourceKeys {
+		keys[key] = struct{}{}
+	}
 }
 
 func (a *ApplicationInstance) upsertPresentMonitoredResource(resource *PresentMonitoredResource) {
-	a.trackedResourceKeys.Set(resource.ResourceKey(), true)
-	a.presentMonitoredResources.Set(resource.DesiredResourceId, resource)
+	a.trackedResourceKeys[resource.ResourceKey()] = struct{}{}
+	a.presentMonitoredResources[resource.DesiredResourceId] = resource
 }
 
 func (a *ApplicationInstance) deletePresentMonitoredResource(desiredResourceId DesiredResourceId) {
-	presentMonitoredResource, _ := a.presentMonitoredResources.Get(desiredResourceId)
-
-	a.trackedResourceKeys.Remove(presentMonitoredResource.ResourceKey())
-	a.presentMonitoredResources.Remove(desiredResourceId)
+	if presentMonitoredResource, ok := a.presentMonitoredResources[desiredResourceId]; ok {
+		delete(a.trackedResourceKeys, presentMonitoredResource.ResourceKey())
+		delete(a.presentMonitoredResources, desiredResourceId)
+	}
 }
 
 func (a *ApplicationInstance) upsertChildMonitoredResource(resource *ChildMonitoredResource) {
-	a.trackedResourceKeys.Set(resource.ResourceKey(), true)
-	a.childMonitoredResources.Set(resource.ResourceKey(), resource)
+	a.trackedResourceKeys[resource.ResourceKey()] = struct{}{}
+	a.childMonitoredResources[resource.ResourceKey()] = resource
 }
 
 func (a *ApplicationInstance) deleteChildMonitoredResource(resourceKey kube.ResourceKey) {
-	childMonitoredResource, _ := a.childMonitoredResources.Get(resourceKey)
-	a.trackedResourceKeys.Remove(childMonitoredResource.ResourceKey())
-	a.childMonitoredResources.Remove(resourceKey)
+	if childMonitoredResource, ok := a.childMonitoredResources[resourceKey]; ok {
+		delete(a.trackedResourceKeys, childMonitoredResource.ResourceKey())
+		delete(a.childMonitoredResources, resourceKey)
+	}
 }
 
 func (a *ApplicationInstance) upsertMissingMonitoredResource(resource *MissingMonitoredResource) {
-	a.missingMonitoredResources.Set(resource.DesiredResourceId, resource)
+	a.missingMonitoredResources[resource.DesiredResourceId] = resource
 }
 
 func (a *ApplicationInstance) deleteMissingMonitoredResource(desiredResourceId DesiredResourceId) {
-	a.missingMonitoredResources.Remove(desiredResourceId)
+	delete(a.missingMonitoredResources, desiredResourceId)
+}
+
+func nonNil[K comparable, V any](m map[K]V) map[K]V {
+	if m == nil {
+		return map[K]V{}
+	}
+	return m
 }

@@ -127,7 +127,7 @@ func (h *Handler) processRequest(logRequest *pb.FetchContainerLogsRequest) bool 
 	requestLogger.InfoContext(ctx, "Received log request")
 
 	clusterId := logRequest.ClusterId.FromProto()
-	reqCluster, err := h.Clusters.GetCluster(clusterId)
+	reqCluster, err := h.Clusters.GetCluster(ctx, clusterId)
 	if err != nil {
 		requestLogger.ErrorContext(ctx, "Error getting cluster", slog.Any("error", err))
 		return true

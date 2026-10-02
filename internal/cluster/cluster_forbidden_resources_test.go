@@ -2,10 +2,9 @@ package cluster
 
 import (
 	"fmt"
-	"io"
-	"log/slog"
 	"testing"
 
+	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache"
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache/mocks"
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/kube"
 	"github.com/stretchr/testify/assert"
@@ -50,15 +49,10 @@ func addEmptyLiveObjectExpectations(mockCache *mocks.ClusterCache) {
 	).Return()
 }
 
-func newForbiddenResourceTestCluster(mockCache Cache) *Cluster {
-	return &Cluster{
-		ClusterId:            "cluster-id",
-		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
-		clusterCache:         mockCache,
-		namespaceScopedMode:  true,
-		targetNamespaces:     map[string]struct{}{"watched": {}},
-		ApplicationInstances: NewApplicationInstanceList(),
-	}
+func newForbiddenResourceTestCluster(t *testing.T, mockCache *mocks.ClusterCache) *sharedCluster {
+	t.Helper()
+	mockCache.On("GetClusterInfo").Return(cache.ClusterInfo{})
+	return newTestSharedCluster(t, ClusterConnection{Cache: mockCache, TargetNamespaces: []string{"watched"}})
 }
 
 func newForbiddenDesiredResource(id DesiredResourceId, name string) DesiredResource {
@@ -91,14 +85,14 @@ func TestGetMonitoredResources_ForbiddenResource_NoParentChild(t *testing.T) {
 	)
 	addEmptyLiveObjectExpectations(mockCache)
 
-	c := newForbiddenResourceTestCluster(mockCache)
+	shared := newForbiddenResourceTestCluster(t, mockCache)
 	forbiddenDesired := newForbiddenDesiredResource("forbidden-id", "my-cloudeventsource")
 
 	desiredResources := map[kube.ResourceKey]*DesiredResource{
 		forbiddenDesired.ResourceKey(): &forbiddenDesired,
 	}
 
-	_, _, missing, unknown, err := c.getMonitoredResources(desiredResources, "salt", true)
+	_, _, missing, unknown, err := shared.getMonitoredResources(testClusterId, desiredResources, "salt", true)
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -128,7 +122,7 @@ func TestGetMonitoredResources_ForbiddenParentResource(t *testing.T) {
 	mockCache.On("IsNamespaced", deployGK).Return(true, nil)
 	addEmptyLiveObjectExpectations(mockCache)
 
-	c := newForbiddenResourceTestCluster(mockCache)
+	shared := newForbiddenResourceTestCluster(t, mockCache)
 
 	deployDesired := NewDesiredResourceBuilder().
 		WithId("deploy-id").
@@ -151,7 +145,7 @@ func TestGetMonitoredResources_ForbiddenParentResource(t *testing.T) {
 		forbiddenDesired.ResourceKey(): &forbiddenDesired,
 	}
 
-	_, _, missing, unknown, err := c.getMonitoredResources(desiredResources, "salt", true)
+	_, _, missing, unknown, err := shared.getMonitoredResources(testClusterId, desiredResources, "salt", true)
 	if !assert.NoError(t, err) {
 		return
 	}

@@ -2,8 +2,12 @@ package kwok_integration
 
 import (
 	"context"
-	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"k8s.io/client-go/util/retry"
 
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
@@ -17,7 +21,6 @@ import (
 func TestDiffMonitoredResources(t *testing.T) {
 	var desiredDeployment *appsv1.Deployment
 	resourceName := "deployment-diff"
-	kind := "Deployment"
 
 	diffFeature := features.New("Diff").
 		Setup(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
@@ -26,29 +29,26 @@ func TestDiffMonitoredResources(t *testing.T) {
 			desiredResource := *mapToDesiredResource(cfg, *desiredDeployment)
 
 			testCluster := createTestCluster(t, cfg)
-
-			applicationInstance := cluster.NewApplicationInstanceBuilder().
-				WithDesiredResources([]*cluster.DesiredResource{&desiredResource}).
-				Build()
-
-			testCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
+			if err := testCluster.ReplaceDesiredResources(
+				ctx, testApplicationInstanceId, desiredResourceMap(&desiredResource), testHashSalt,
+			); err != nil {
+				t.Fatal(err)
+			}
 
 			waitForDeployment(ctx, t, cfg, resourceName)
 			return context.WithValue(ctx, testContextKey("testCluster"), testCluster)
 		}).
 		Assess("Unmodified: InSync", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			liveDeployment := GetMonitoredResource(ctx, t, kind, resourceName)
+			liveDeployment := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 
 			AssertSyncStatus(t, liveDeployment, cluster.SyncStatusInSync)
 
 			return ctx
 		}).
 		Assess("Added fields: InSync", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			modifiedDeployment := GetCurrentDeployment(ctx, t, cfg, resourceName)
-			modifiedDeployment.Annotations = *GenerateData(func(data *map[string]string) { (*data)["field3"] = "poiu" })
-			UpdateDeployment(ctx, t, cfg, modifiedDeployment)
+			UpdateDeploymentAnnotations(ctx, t, cfg, resourceName, *GenerateData(func(data *map[string]string) { (*data)["field3"] = "poiu" }))
 
-			liveConfigMap := GetMonitoredResource(ctx, t, kind, resourceName)
+			liveConfigMap := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 
 			AssertSyncStatus(t, liveConfigMap, cluster.SyncStatusInSync)
 
@@ -57,11 +57,9 @@ func TestDiffMonitoredResources(t *testing.T) {
 		Assess("Modified field: OutOfSync", func(
 			ctx context.Context, t *testing.T, cfg *envconf.Config,
 		) context.Context {
-			modifiedDeployment := GetCurrentDeployment(ctx, t, cfg, resourceName)
-			modifiedDeployment.Annotations = *GenerateData(func(data *map[string]string) { (*data)["field1"] = "changed" })
-			UpdateDeployment(ctx, t, cfg, modifiedDeployment)
+			UpdateDeploymentAnnotations(ctx, t, cfg, resourceName, *GenerateData(func(data *map[string]string) { (*data)["field1"] = "changed" }))
 
-			liveConfigMap := GetMonitoredResource(ctx, t, kind, resourceName)
+			liveConfigMap := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 
 			AssertSyncStatus(t, liveConfigMap, cluster.SyncStatusOutOfSync)
 
@@ -70,11 +68,9 @@ func TestDiffMonitoredResources(t *testing.T) {
 		Assess("Removed field: OutOfSync", func(
 			ctx context.Context, t *testing.T, cfg *envconf.Config,
 		) context.Context {
-			modifiedDeployment := GetCurrentDeployment(ctx, t, cfg, resourceName)
-			modifiedDeployment.Annotations = *GenerateData(func(data *map[string]string) { delete((*data), "field1") })
-			UpdateDeployment(ctx, t, cfg, modifiedDeployment)
+			UpdateDeploymentAnnotations(ctx, t, cfg, resourceName, *GenerateData(func(data *map[string]string) { delete((*data), "field1") }))
 
-			liveConfigMap := GetMonitoredResource(ctx, t, kind, resourceName)
+			liveConfigMap := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 
 			AssertSyncStatus(t, liveConfigMap, cluster.SyncStatusOutOfSync)
 
@@ -93,8 +89,17 @@ func AssertSyncStatus(
 	}
 }
 
-func UpdateDeployment(ctx context.Context, t *testing.T, cfg *envconf.Config, deployment *appsv1.Deployment) {
-	if err := cfg.Client().Resources().Update(ctx, deployment); err != nil {
+// UpdateDeploymentAnnotations retries because the deployment controller rewrites its revision annotation
+// whenever the annotations are replaced, racing the update.
+func UpdateDeploymentAnnotations(
+	ctx context.Context, t *testing.T, cfg *envconf.Config, name string, annotations map[string]string,
+) {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		deployment := GetCurrentDeployment(ctx, t, cfg, name)
+		deployment.Annotations = annotations
+		return cfg.Client().Resources().Update(ctx, deployment)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 }
@@ -136,33 +141,36 @@ func GetCurrentDeployment(
 	return &modifiedConfigMap
 }
 
-func GetMonitoredResource(
-	ctx context.Context, t *testing.T, kind string, prefix string,
+// GetMonitoredDeployment sweeps until the swept deployment has caught up with the API server, because
+// changes reach the shared cache through its watch rather than a forced relist.
+func GetMonitoredDeployment(
+	ctx context.Context, t *testing.T, cfg *envconf.Config, name string,
 ) *cluster.PresentMonitoredResource {
-	testCluster := ctx.Value(testContextKey("testCluster")).(*cluster.Cluster)
+	t.Helper()
+	testCluster := ctx.Value(testContextKey("testCluster")).(*testTarget)
 
-	testCluster.RequestCacheRefresh()
+	var monitored *cluster.PresentMonitoredResource
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		var live appsv1.Deployment
+		require.NoError(c, cfg.Client().Resources().Get(ctx, name, cfg.Namespace(), &live))
 
-	var applicationInstanceUpdates []cluster.ApplicationInstanceChanges
-	for applicationInstanceUpdate := range testCluster.GetApplicationInstanceUpdates(context.TODO()) {
-		applicationInstanceUpdates = append(applicationInstanceUpdates, *applicationInstanceUpdate)
-	}
+		changes := testCluster.sweep(ctx)
+		require.Len(c, changes, 1)
 
-	if len(applicationInstanceUpdates) != 1 {
-		t.Errorf("Expected 1 ApplicationInstanceUpdate, found %d", len(applicationInstanceUpdates))
-	}
+		monitored = findPresentResource(changes[0].PresentMonitoredResources, "Deployment", name)
+		require.NotNil(c, monitored)
+		require.Equal(c, live.ResourceVersion, monitored.ResourceVersion)
+	}, time.Minute, 200*time.Millisecond)
+	return monitored
+}
 
-	var matchingResources []*cluster.PresentMonitoredResource
-
-	for _, resource := range applicationInstanceUpdates[0].PresentMonitoredResources {
-		if resource.GroupVersionKind.Kind == kind &&
-			strings.HasPrefix(resource.Name, prefix) {
-			matchingResources = append(matchingResources, resource)
+func findPresentResource(
+	resources []*cluster.PresentMonitoredResource, kind string, name string,
+) *cluster.PresentMonitoredResource {
+	for _, resource := range resources {
+		if resource.GroupVersionKind.Kind == kind && resource.Name == name {
+			return resource
 		}
 	}
-
-	if len(matchingResources) != 1 {
-		t.Errorf("Expected 1 matching resource for kind %s, found: %d", kind, len(matchingResources))
-	}
-	return matchingResources[0]
+	return nil
 }

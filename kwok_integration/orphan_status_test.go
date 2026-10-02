@@ -16,7 +16,6 @@ import (
 func TestOrphanStatus(t *testing.T) {
 	var desiredDeployment *appsv1.Deployment
 	resourceName := "deployment-orphan"
-	kind := "Deployment"
 
 	orphanFeature := features.New("Orphan").
 		Setup(func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
@@ -27,18 +26,17 @@ func TestOrphanStatus(t *testing.T) {
 			desiredResource.OrphanedAt = &orphanedAt
 
 			testCluster := createTestCluster(t, cfg)
-
-			applicationInstance := cluster.NewApplicationInstanceBuilder().
-				WithDesiredResources([]*cluster.DesiredResource{&desiredResource}).
-				Build()
-
-			testCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
+			if err := testCluster.ReplaceDesiredResources(
+				ctx, testApplicationInstanceId, desiredResourceMap(&desiredResource), testHashSalt,
+			); err != nil {
+				t.Fatal(err)
+			}
 
 			waitForDeployment(ctx, t, cfg, resourceName)
 			return context.WithValue(ctx, testContextKey("testCluster"), testCluster)
 		}).
 		Assess("Orphaned resource: Orphaned", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			liveDeployment := GetMonitoredResource(ctx, t, kind, resourceName)
+			liveDeployment := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 
 			AssertSyncStatus(t, liveDeployment, cluster.SyncStatusOrphaned)
 
@@ -47,11 +45,9 @@ func TestOrphanStatus(t *testing.T) {
 		Assess("Orphaned resource drifted from manifest: still Orphaned, not OutOfSync", func(
 			ctx context.Context, t *testing.T, cfg *envconf.Config,
 		) context.Context {
-			modifiedDeployment := GetCurrentDeployment(ctx, t, cfg, resourceName)
-			modifiedDeployment.Annotations = *GenerateData(func(data *map[string]string) { (*data)["field1"] = "changed" })
-			UpdateDeployment(ctx, t, cfg, modifiedDeployment)
+			UpdateDeploymentAnnotations(ctx, t, cfg, resourceName, *GenerateData(func(data *map[string]string) { (*data)["field1"] = "changed" }))
 
-			liveDeployment := GetMonitoredResource(ctx, t, kind, resourceName)
+			liveDeployment := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 
 			AssertSyncStatus(t, liveDeployment, cluster.SyncStatusOrphaned)
 

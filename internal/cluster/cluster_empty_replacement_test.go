@@ -2,8 +2,6 @@ package cluster
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"testing"
 
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache"
@@ -37,14 +35,10 @@ func (u *recordingUpdater) Replace(_ context.Context, replacement *ApplicationIn
 	u.replacements = append(u.replacements, replacement)
 }
 
-func newEmptyReplacementTestCluster() *Cluster {
-	return newReplacementTestCluster(nil, nil)
-}
-
-func newReplacementTestCluster(syncError error, updater MonitoredResourcesUpdater) *Cluster {
+func newReplacementTestConnection() ClusterConnection {
 	mockCache := &mocks.ClusterCache{}
 	mockCache.On("GetClusterInfo").Return(cache.ClusterInfo{Server: "test-server"})
-	mockCache.On("EnsureSynced").Return(syncError)
+	mockCache.On("EnsureSynced").Return(nil)
 	mockCache.On("GetAPIResources").Return([]kube.APIResourceInfo{{GroupKind: deploymentGroupKind}})
 	mockCache.On("IsNamespaced", deploymentGroupKind).Return(true, nil)
 	mockCache.On("GetManagedLiveObjs", mock.Anything, mock.Anything).
@@ -58,45 +52,39 @@ func newReplacementTestCluster(syncError error, updater MonitoredResourcesUpdate
 		}}},
 	}}
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	return &Cluster{
-		ClusterId:                    "cluster-id",
-		logger:                       logger,
-		mutex:                        NewMutexWithLogging(logger, "Cluster"),
-		clusterCache:                 mockCache,
-		cachedDiscoveryClient:        discoveryClient,
-		ApplicationInstances:         NewApplicationInstanceList(),
-		updateMonitoredResourcesFunc: updater,
-	}
+	return ClusterConnection{Cache: mockCache, Discovery: discoveryClient}
 }
 
-func countApplicationInstanceUpdates(c *Cluster) int {
+func countApplicationInstanceUpdates(t *testing.T, clusterList *ClusterList) int {
+	t.Helper()
 	count := 0
-	for range c.GetApplicationInstanceUpdates(context.TODO()) {
+	for range clusterList.ApplicationInstanceUpdates(t.Context()) {
 		count++
 	}
 
 	return count
 }
 
-func TestGetApplicationInstanceUpdates(t *testing.T) {
+func TestApplicationInstanceUpdates(t *testing.T) {
 	t.Run("Reports an empty application instance on every sweep", func(t *testing.T) {
-		testCluster := newEmptyReplacementTestCluster()
+		clusterList := NewClusterListFromConnection(
+			t.Context(), discardLogger(), NoOpUpdater{}, newReplacementTestConnection())
+		testCluster, err := clusterList.EnsureCluster(t.Context(), testClusterId)
+		require.NoError(t, err)
 
 		applicationInstance := NewApplicationInstanceBuilder().
 			WithDesiredResources([]*DesiredResource{}).
 			Build()
-		testCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
+		seedApplicationInstances(t, testCluster, &applicationInstance)
 
-		assert.Equal(t, 1, countApplicationInstanceUpdates(testCluster),
+		assert.Equal(t, 1, countApplicationInstanceUpdates(t, clusterList),
 			"Server has to be told the application instance monitors nothing")
 
-		_, stillListed := testCluster.ApplicationInstances.Get(applicationInstance.ApplicationInstanceId)
+		_, stillListed := storedApplicationInstance(t, testCluster, applicationInstance.ApplicationInstanceId)
 		assert.True(t, stillListed,
 			"an application instance reported as empty stays listed so Server can refill it")
 
-		assert.Equal(t, 1, countApplicationInstanceUpdates(testCluster),
+		assert.Equal(t, 1, countApplicationInstanceUpdates(t, clusterList),
 			"the empty instance stays in the sweep and is reported again")
 	})
 }
@@ -104,16 +92,16 @@ func TestGetApplicationInstanceUpdates(t *testing.T) {
 func TestReplaceDesiredResources(t *testing.T) {
 	t.Run("Empty list for an unknown application instance reports it as empty", func(t *testing.T) {
 		updater := &recordingUpdater{}
-		testCluster := newReplacementTestCluster(nil, updater)
+		testCluster := newTestCluster(t, newTestSharedCluster(t, newReplacementTestConnection()), updater)
 
 		err := testCluster.ReplaceDesiredResources(
-			context.TODO(), "never-seen", map[kube.ResourceKey]*DesiredResource{}, "fake-salt")
+			t.Context(), "never-seen", map[kube.ResourceKey]*DesiredResource{}, "fake-salt")
 
 		require.NoError(t, err)
 		assert.Len(t, updater.replacements, 1,
 			"Server has to be told the application instance monitors nothing")
 
-		stored, created := testCluster.ApplicationInstances.Get("never-seen")
+		stored, created := storedApplicationInstance(t, testCluster, "never-seen")
 		require.True(t, created,
 			"the application instance has to be tracked so later replacements are diffed against it")
 		assert.Empty(t, stored.GetDesiredResources())
@@ -121,23 +109,22 @@ func TestReplaceDesiredResources(t *testing.T) {
 
 	t.Run("Empty list for a known application instance still clears it", func(t *testing.T) {
 		updater := &recordingUpdater{}
-		testCluster := newReplacementTestCluster(nil, updater)
-
 		existing := NewDesiredResourceBuilder().Build()
 		applicationInstance := NewApplicationInstanceBuilder().
 			WithDesiredResources([]*DesiredResource{&existing}).
 			Build()
-		testCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
+		testCluster := newTestCluster(
+			t, newTestSharedCluster(t, newReplacementTestConnection()), updater, &applicationInstance)
 
 		err := testCluster.ReplaceDesiredResources(
-			context.TODO(), applicationInstance.ApplicationInstanceId,
+			t.Context(), applicationInstance.ApplicationInstanceId,
 			map[kube.ResourceKey]*DesiredResource{}, "fake-salt")
 
 		require.NoError(t, err)
 		assert.Len(t, updater.replacements, 1,
 			"an instance Server has already been told about has to be told it is now empty")
 
-		stored, found := testCluster.ApplicationInstances.Get(applicationInstance.ApplicationInstanceId)
+		stored, found := storedApplicationInstance(t, testCluster, applicationInstance.ApplicationInstanceId)
 		require.True(t, found)
 		assert.Empty(t, stored.GetDesiredResources())
 	})

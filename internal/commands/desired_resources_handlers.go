@@ -92,16 +92,15 @@ func (c *CommandHandler) handlePruneOtherVersionsCommand(command *pb.PruneOtherV
 	c.Logger.With(slog.Any("ApplicationInstanceId", command.ApplicationInstanceId)).
 		Debug("Received request to prune desired resources")
 
-	cluster, err := c.Clusters.GetCluster(command.ClusterId.FromProto())
+	cluster, err := c.Clusters.GetCluster(c.context, command.ClusterId.FromProto())
 	if err != nil {
 		return err
 	}
 
-	cluster.DeleteDesiredResourcesExceptForVersion(
+	return cluster.DeleteDesiredResourcesExceptForVersion(
+		c.context,
 		command.ApplicationInstanceId.FromProto(),
 		command.Version.FromProto())
-
-	return nil
 }
 
 func (c *CommandHandler) handleDeleteDesiredResourcesCommand(command *pb.DeleteDesiredResourcesCommand) error {
@@ -109,7 +108,7 @@ func (c *CommandHandler) handleDeleteDesiredResourcesCommand(command *pb.DeleteD
 		With(slog.Int("ResourceCount", len(command.ResourceIds))).
 		Debug("Received request to prune specific desired resources")
 
-	cluster, err := c.Clusters.GetCluster(command.ClusterId.FromProto())
+	cluster, err := c.Clusters.GetCluster(c.context, command.ClusterId.FromProto())
 	if err != nil {
 		return err
 	}
@@ -119,6 +118,5 @@ func (c *CommandHandler) handleDeleteDesiredResourcesCommand(command *pb.DeleteD
 		resourceIds[i] = id.FromProto()
 	}
 
-	cluster.DeleteDesiredResources(command.ApplicationInstanceId.FromProto(), resourceIds)
-	return nil
+	return cluster.DeleteDesiredResources(c.context, command.ApplicationInstanceId.FromProto(), resourceIds)
 }

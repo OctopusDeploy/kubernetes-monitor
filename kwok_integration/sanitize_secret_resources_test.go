@@ -44,7 +44,7 @@ func TestSanitizeSecrets(t *testing.T) {
 			}
 
 			testCluster := createTestCluster(t, cfg)
-			setupApplicationInstance(createdSecret, gvk, testCluster)
+			setupApplicationInstance(ctx, t, createdSecret, gvk, testCluster)
 			return context.WithValue(ctx, testContextKey("testCluster"), testCluster)
 		}).
 		Assess("data hashed", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
@@ -72,7 +72,9 @@ func getActualSecret(ctx context.Context, t *testing.T, cfg *envconf.Config, sec
 	return secretActual
 }
 
-func setupApplicationInstance(createdSecret corev1.Secret, gvk *schema.GroupVersionKind, testCluster *cluster.Cluster) {
+func setupApplicationInstance(
+	ctx context.Context, t *testing.T, createdSecret corev1.Secret, gvk *schema.GroupVersionKind, testCluster *testTarget,
+) {
 	salt := crypto.HashSalt("Projects-123/Environments-45/Tenants-6")
 
 	// The Secret object holds the value in a byte[]
@@ -103,23 +105,16 @@ func setupApplicationInstance(createdSecret corev1.Secret, gvk *schema.GroupVers
 			},
 		}).Build()
 
-	applicationInstance := cluster.NewApplicationInstanceBuilder().
-		WithHashSalt(salt).
-		WithDesiredResources([]*cluster.DesiredResource{&desiredResource}).
-		Build()
-
-	testCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
+	if err := testCluster.ReplaceDesiredResources(
+		ctx, testApplicationInstanceId, desiredResourceMap(&desiredResource), salt,
+	); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func getPresentMonitoredResource(ctx context.Context, t *testing.T) *cluster.PresentMonitoredResource {
-	testCluster := ctx.Value(testContextKey("testCluster")).(*cluster.Cluster)
-
-	_ = testCluster.Sync()
-
-	var applicationInstanceUpdates []cluster.ApplicationInstanceChanges
-	for applicationInstanceUpdate := range testCluster.GetApplicationInstanceUpdates(context.TODO()) {
-		applicationInstanceUpdates = append(applicationInstanceUpdates, *applicationInstanceUpdate)
-	}
+	testCluster := ctx.Value(testContextKey("testCluster")).(*testTarget)
+	applicationInstanceUpdates := testCluster.sweep(ctx)
 
 	if len(applicationInstanceUpdates) != 1 {
 		t.Fatalf("Expected 1 ApplicationInstanceUpdate, found %d", len(applicationInstanceUpdates))
