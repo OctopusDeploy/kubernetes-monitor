@@ -52,7 +52,10 @@ func TestHandle_UpdateDesiredResourcesCommand_UpdatesApplicationInstance(t *test
 
 	updateDesiredResources(t, commandHandler, *expectedResource.Version, expectedResource)
 
-	if diff := cmp.Diff([]cluster.DesiredResourceId{expectedResource.Id}, desiredResourceIds(t, commandHandler)); diff != "" {
+	if diff := cmp.Diff(
+		[]cluster.DesiredResourceId{expectedResource.Id},
+		desiredResourceIds(t, commandHandler),
+	); diff != "" {
 		t.Error(diff)
 	}
 }

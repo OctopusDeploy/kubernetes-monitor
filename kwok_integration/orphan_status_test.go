@@ -45,7 +45,13 @@ func TestOrphanStatus(t *testing.T) {
 		Assess("Orphaned resource drifted from manifest: still Orphaned, not OutOfSync", func(
 			ctx context.Context, t *testing.T, cfg *envconf.Config,
 		) context.Context {
-			UpdateDeploymentAnnotations(ctx, t, cfg, resourceName, *GenerateData(func(data *map[string]string) { (*data)["field1"] = "changed" }))
+			UpdateDeploymentAnnotations(
+				ctx,
+				t,
+				cfg,
+				resourceName,
+				*GenerateData(func(data *map[string]string) { (*data)["field1"] = "changed" }),
+			)
 
 			liveDeployment := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 

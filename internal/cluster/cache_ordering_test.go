@@ -114,7 +114,14 @@ func TestGetMonitoredResources_AfterOutOfOrderPopulate_DoesNotCrash(t *testing.T
 	createAndWait(t, dyn, namespace, replicaSet, rsGVR, kube.GetResourceKey(replicaSet), events)
 	createAndWait(t, dyn, namespace, deployment, deploymentGVR, kube.GetResourceKey(deployment), events)
 
-	shared := ClusterConnection{Cache: cc, DynamicClient: dyn, Discovery: disc}.sharedCluster(discardLogger(), interests)
+	shared := ClusterConnection{
+		Cache:         cc,
+		DynamicClient: dyn,
+		Discovery:     disc,
+	}.sharedCluster(
+		discardLogger(),
+		interests,
+	)
 	// getMonitoredResources doesn't sync — callers do — so the watch-driven state survives into the assertion
 
 	desiredMap := map[kube.ResourceKey]*DesiredResource{desired.ResourceKey(): &desired}

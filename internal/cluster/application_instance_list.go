@@ -90,7 +90,10 @@ func (l *ApplicationInstanceList) GetChangesForUpdatedResource(
 		}
 
 		if updateApplicationInstanceRequest != nil {
-			updateApplicationInstanceRequests = append(updateApplicationInstanceRequests, updateApplicationInstanceRequest)
+			updateApplicationInstanceRequests = append(
+				updateApplicationInstanceRequests,
+				updateApplicationInstanceRequest,
+			)
 		}
 	}
 

@@ -86,7 +86,12 @@ func TestGetMonitoredResources_SkipsClusterScopedInNamespaceScopedMode(t *testin
 		clusterScopedDesired.ResourceKey(): &clusterScopedDesired,
 	}
 
-	_, _, missing, unknown, err := shared.getMonitoredResources(testClusterId, desiredResources, crypto.HashSalt("salt"), true)
+	_, _, missing, unknown, err := shared.getMonitoredResources(
+		testClusterId,
+		desiredResources,
+		crypto.HashSalt("salt"),
+		true,
+	)
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -173,7 +178,12 @@ func TestGetMonitoredResources_MarksForbiddenResourcesAsUnknown(t *testing.T) {
 		forbiddenDesired.ResourceKey(): &forbiddenDesired,
 	}
 
-	_, _, missing, unknown, err := shared.getMonitoredResources(testClusterId, desiredResources, crypto.HashSalt("salt"), true)
+	_, _, missing, unknown, err := shared.getMonitoredResources(
+		testClusterId,
+		desiredResources,
+		crypto.HashSalt("salt"),
+		true,
+	)
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -273,7 +283,12 @@ func TestGetMonitoredResources_SkipsOutOfScopeNamespacesBeforeGetManagedLiveObjs
 				outOfScopeDesired.ResourceKey(): &outOfScopeDesired,
 			}
 
-			_, _, missing, unknown, err := shared.getMonitoredResources(testClusterId, desiredResources, crypto.HashSalt("salt"), true)
+			_, _, missing, unknown, err := shared.getMonitoredResources(
+				testClusterId,
+				desiredResources,
+				crypto.HashSalt("salt"),
+				true,
+			)
 			if !assert.NoError(t, err) {
 				return
 			}

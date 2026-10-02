@@ -185,7 +185,9 @@ func TestResourceChangesRacingDesiredResourceRemoval(t *testing.T) {
 			creating := make(chan error, 1)
 			go func() {
 				defer close(creating)
-				if err := cfg.Client().Resources().Create(ctx, newIsolatedDeployment(cfg.Namespace(), created)); err != nil {
+				if err := cfg.Client().
+					Resources().
+					Create(ctx, newIsolatedDeployment(cfg.Namespace(), created)); err != nil {
 					creating <- err
 				}
 			}()
@@ -337,11 +339,14 @@ func assertNoUpdatesMentioning(
 }
 
 func carriesTouch(changes *cluster.ApplicationInstanceChanges, deployment string, token string) bool {
-	return slices.ContainsFunc(changes.PresentMonitoredResources, func(resource *cluster.PresentMonitoredResource) bool {
-		return resource.Name == deployment && resource.Manifest != nil &&
-			resource.Manifest.Object["metadata"].(map[string]any)["annotations"] != nil &&
-			resource.Manifest.Object["metadata"].(map[string]any)["annotations"].(map[string]any)[touchAnnotation] == token
-	})
+	return slices.ContainsFunc(
+		changes.PresentMonitoredResources,
+		func(resource *cluster.PresentMonitoredResource) bool {
+			return resource.Name == deployment && resource.Manifest != nil &&
+				resource.Manifest.Object["metadata"].(map[string]any)["annotations"] != nil &&
+				resource.Manifest.Object["metadata"].(map[string]any)["annotations"].(map[string]any)[touchAnnotation] == token
+		},
+	)
 }
 
 // mentions reports whether changes refer to the deployment or anything it owns. Owned resources are named

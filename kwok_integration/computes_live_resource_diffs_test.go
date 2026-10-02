@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/util/retry"
-
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 
@@ -46,7 +45,13 @@ func TestDiffMonitoredResources(t *testing.T) {
 			return ctx
 		}).
 		Assess("Added fields: InSync", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			UpdateDeploymentAnnotations(ctx, t, cfg, resourceName, *GenerateData(func(data *map[string]string) { (*data)["field3"] = "poiu" }))
+			UpdateDeploymentAnnotations(
+				ctx,
+				t,
+				cfg,
+				resourceName,
+				*GenerateData(func(data *map[string]string) { (*data)["field3"] = "poiu" }),
+			)
 
 			liveConfigMap := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 
@@ -57,7 +62,13 @@ func TestDiffMonitoredResources(t *testing.T) {
 		Assess("Modified field: OutOfSync", func(
 			ctx context.Context, t *testing.T, cfg *envconf.Config,
 		) context.Context {
-			UpdateDeploymentAnnotations(ctx, t, cfg, resourceName, *GenerateData(func(data *map[string]string) { (*data)["field1"] = "changed" }))
+			UpdateDeploymentAnnotations(
+				ctx,
+				t,
+				cfg,
+				resourceName,
+				*GenerateData(func(data *map[string]string) { (*data)["field1"] = "changed" }),
+			)
 
 			liveConfigMap := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 
@@ -68,7 +79,13 @@ func TestDiffMonitoredResources(t *testing.T) {
 		Assess("Removed field: OutOfSync", func(
 			ctx context.Context, t *testing.T, cfg *envconf.Config,
 		) context.Context {
-			UpdateDeploymentAnnotations(ctx, t, cfg, resourceName, *GenerateData(func(data *map[string]string) { delete((*data), "field1") }))
+			UpdateDeploymentAnnotations(
+				ctx,
+				t,
+				cfg,
+				resourceName,
+				*GenerateData(func(data *map[string]string) { delete((*data), "field1") }),
+			)
 
 			liveConfigMap := GetMonitoredDeployment(ctx, t, cfg, resourceName)
 

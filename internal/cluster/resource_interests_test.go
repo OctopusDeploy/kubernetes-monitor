@@ -36,7 +36,11 @@ func testResource(key kube.ResourceKey, apiVersion string, ownerRefs []metav1.Ow
 	}
 }
 
-func testUnstructured(key kube.ResourceKey, apiVersion string, ownerRefs []metav1.OwnerReference) *unstructured.Unstructured {
+func testUnstructured(
+	key kube.ResourceKey,
+	apiVersion string,
+	ownerRefs []metav1.OwnerReference,
+) *unstructured.Unstructured {
 	un := &unstructured.Unstructured{}
 	un.SetAPIVersion(apiVersion)
 	un.SetKind(key.Kind)
@@ -56,7 +60,11 @@ func keys(resourceKeys ...kube.ResourceKey) map[kube.ResourceKey]struct{} {
 
 // subscribeTestTargets subscribes buffered channels, so routing never waits on a reader and its result can
 // be checked as soon as route returns.
-func subscribeTestTargets(t *testing.T, interests *resourceInterests, targets ...ClusterId) map[ClusterId]chan resourceChange {
+func subscribeTestTargets(
+	t *testing.T,
+	interests *resourceInterests,
+	targets ...ClusterId,
+) map[ClusterId]chan resourceChange {
 	t.Helper()
 	channels := map[ClusterId]chan resourceChange{}
 	for _, target := range targets {

@@ -19,7 +19,10 @@ func newTestSharedCluster(t *testing.T, connection ClusterConnection) *sharedClu
 
 // newTestCluster starts a target over shared that already holds applicationInstances.
 func newTestCluster(
-	t *testing.T, shared *sharedCluster, updater MonitoredResourcesUpdater, applicationInstances ...*ApplicationInstance,
+	t *testing.T,
+	shared *sharedCluster,
+	updater MonitoredResourcesUpdater,
+	applicationInstances ...*ApplicationInstance,
 ) *Cluster {
 	t.Helper()
 	c, err := newCluster(t.Context(), testClusterId, discardLogger(), shared, updater)

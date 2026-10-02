@@ -73,7 +73,11 @@ func getActualSecret(ctx context.Context, t *testing.T, cfg *envconf.Config, sec
 }
 
 func setupApplicationInstance(
-	ctx context.Context, t *testing.T, createdSecret corev1.Secret, gvk *schema.GroupVersionKind, testCluster *testTarget,
+	ctx context.Context,
+	t *testing.T,
+	createdSecret corev1.Secret,
+	gvk *schema.GroupVersionKind,
+	testCluster *testTarget,
 ) {
 	salt := crypto.HashSalt("Projects-123/Environments-45/Tenants-6")
 

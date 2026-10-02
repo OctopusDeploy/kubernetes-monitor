@@ -161,7 +161,13 @@ func (c *Cluster) MergeDesiredResources(
 
 	var update *ApplicationInstanceChanges
 	err := call(ctx, c.mailbox, func(applicationInstances *ApplicationInstanceList) (err error) {
-		update, err = c.mergeDesiredResources(ctx, applicationInstances, applicationInstanceId, desiredResources, hashSalt)
+		update, err = c.mergeDesiredResources(
+			ctx,
+			applicationInstances,
+			applicationInstanceId,
+			desiredResources,
+			hashSalt,
+		)
 		return err
 	})
 	if err != nil {

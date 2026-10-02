@@ -31,7 +31,16 @@ func nextChange(t *testing.T, q *changeQueue) resourceChange {
 func TestChangeQueue(t *testing.T) {
 	t.Run("Folds repeat changes into one, keeping the original previous state", func(t *testing.T) {
 		q := newChangeQueue(t.Context())
-		original, first, latest := versionOf(deploymentKey, "1"), versionOf(deploymentKey, "2"), versionOf(deploymentKey, "3")
+		original, first, latest := versionOf(
+			deploymentKey,
+			"1",
+		), versionOf(
+			deploymentKey,
+			"2",
+		), versionOf(
+			deploymentKey,
+			"3",
+		)
 
 		q.in <- resourceChange{newRes: first, oldRes: original}
 		q.in <- resourceChange{newRes: latest, oldRes: first}
