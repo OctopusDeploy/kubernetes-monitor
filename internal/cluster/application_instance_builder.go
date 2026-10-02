@@ -4,7 +4,6 @@ import (
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/kube"
 
 	"github.com/octopusdeploy/kubernetes-monitor/internal/crypto"
-	"github.com/octopusdeploy/kubernetes-monitor/internal/utilities"
 )
 
 type ApplicationInstanceBuilder struct {
@@ -81,7 +80,7 @@ func (b *ApplicationInstanceBuilder) Build() ApplicationInstance {
 		b.WithDesiredResources([]*DesiredResource{&desiredResource})
 	}
 
-	trackedResourceKeys := map[kube.ResourceKey]bool{}
+	trackedResourceKeys := map[kube.ResourceKey]struct{}{}
 
 	desiredResources := map[kube.ResourceKey]*DesiredResource{}
 	for _, val := range b.desiredResources {
@@ -91,13 +90,13 @@ func (b *ApplicationInstanceBuilder) Build() ApplicationInstance {
 	presentMonitoredResources := map[DesiredResourceId]*PresentMonitoredResource{}
 	for _, val := range b.presentMonitoredResources {
 		presentMonitoredResources[val.DesiredResourceId] = val
-		trackedResourceKeys[val.ResourceKey()] = true
+		trackedResourceKeys[val.ResourceKey()] = struct{}{}
 	}
 
 	childMonitoredResources := map[kube.ResourceKey]*ChildMonitoredResource{}
 	for _, val := range b.childMonitoredResources {
 		childMonitoredResources[val.ResourceKey()] = val
-		trackedResourceKeys[val.ResourceKey()] = true
+		trackedResourceKeys[val.ResourceKey()] = struct{}{}
 	}
 
 	missingMonitoredResources := map[DesiredResourceId]*MissingMonitoredResource{}
@@ -113,11 +112,11 @@ func (b *ApplicationInstanceBuilder) Build() ApplicationInstance {
 	return ApplicationInstance{
 		ApplicationInstanceId:     ApplicationInstanceId(b.applicationInstanceId),
 		hashSalt:                  b.hashSalt,
-		desiredResources:          utilities.NewConcurrentMapFromMap(desiredResources),
-		presentMonitoredResources: utilities.NewConcurrentMapFromMap(presentMonitoredResources),
-		childMonitoredResources:   utilities.NewConcurrentMapFromMap(childMonitoredResources),
-		missingMonitoredResources: utilities.NewConcurrentMapFromMap(missingMonitoredResources),
-		unknownMonitoredResources: utilities.NewConcurrentMapFromMap(unknownMonitoredResources),
-		trackedResourceKeys:       utilities.NewConcurrentMapFromMap(trackedResourceKeys),
+		desiredResources:          desiredResources,
+		presentMonitoredResources: presentMonitoredResources,
+		childMonitoredResources:   childMonitoredResources,
+		missingMonitoredResources: missingMonitoredResources,
+		unknownMonitoredResources: unknownMonitoredResources,
+		trackedResourceKeys:       trackedResourceKeys,
 	}
 }

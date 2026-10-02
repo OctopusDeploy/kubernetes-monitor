@@ -25,10 +25,9 @@ and register will save the values in the specified config store.`,
 		// Handle SIGINT (CTRL+C) gracefully.
 		ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt)
 
-		debug, _ := cmd.Flags().GetBool("debug")
-		logger := logger.New(debug)
-		slog.SetDefault(logger)
 		cfg, err := config.GetConfig(cmd.Flags(), "")
+		logger := logger.New(cfg != nil && cfg.DebugEnabled)
+		slog.SetDefault(logger)
 		if err != nil {
 			var failedToReadError config.FailedToReadConfigError
 			ok := errors.As(err, &failedToReadError)

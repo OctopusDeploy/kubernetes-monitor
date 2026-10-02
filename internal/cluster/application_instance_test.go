@@ -522,10 +522,7 @@ func TestDeleteDesiredResources_OnlyRemovesListedResources(t *testing.T) {
 		WithDesiredResources([]*DesiredResource{&r2}).
 		Build()
 
-	if diff := cmp.Diff(
-		expected.desiredResources.GetAsMap(),
-		applicationInstance.desiredResources.GetAsMap(),
-	); diff != "" {
+	if diff := cmp.Diff(expected.desiredResources, applicationInstance.desiredResources); diff != "" {
 		t.Error(diff)
 	}
 }
@@ -548,10 +545,7 @@ func TestDeleteDesiredResourcesExceptForVersion_KeepsResourcesWithNoVersion(t *t
 		WithDesiredResources([]*DesiredResource{&unversioned, &keptVersion}).
 		Build()
 
-	if diff := cmp.Diff(
-		expected.desiredResources.GetAsMap(),
-		applicationInstance.desiredResources.GetAsMap(),
-	); diff != "" {
+	if diff := cmp.Diff(expected.desiredResources, applicationInstance.desiredResources); diff != "" {
 		t.Error(diff)
 	}
 }
@@ -572,10 +566,7 @@ func TestDeleteDesiredResources_UnknownIdIsIgnored(t *testing.T) {
 		WithDesiredResources([]*DesiredResource{&r2}).
 		Build()
 
-	if diff := cmp.Diff(
-		expected.desiredResources.GetAsMap(),
-		applicationInstance.desiredResources.GetAsMap(),
-	); diff != "" {
+	if diff := cmp.Diff(expected.desiredResources, applicationInstance.desiredResources); diff != "" {
 		t.Error(diff)
 	}
 }
@@ -594,10 +585,7 @@ func TestDeleteDesiredResources_EmptyListRemovesNothing(t *testing.T) {
 		WithDesiredResources([]*DesiredResource{&r1, &r2}).
 		Build()
 
-	if diff := cmp.Diff(
-		expected.desiredResources.GetAsMap(),
-		applicationInstance.desiredResources.GetAsMap(),
-	); diff != "" {
+	if diff := cmp.Diff(expected.desiredResources, applicationInstance.desiredResources); diff != "" {
 		t.Error(diff)
 	}
 }
@@ -620,35 +608,23 @@ func newUnknownMonitoredResourceFromDesiredResource(desiredResource DesiredResou
 }
 
 func assertApplicationInstancesEqual(t *testing.T, expected *ApplicationInstance, actual *ApplicationInstance) {
-	if diff := cmp.Diff(expected.desiredResources.GetAsMap(), actual.desiredResources.GetAsMap()); diff != "" {
+	if diff := cmp.Diff(expected.desiredResources, actual.desiredResources); diff != "" {
 		t.Error(diff)
 	}
 
-	if diff := cmp.Diff(
-		expected.presentMonitoredResources.GetAsMap(),
-		actual.presentMonitoredResources.GetAsMap(),
-	); diff != "" {
+	if diff := cmp.Diff(expected.presentMonitoredResources, actual.presentMonitoredResources); diff != "" {
 		t.Error(diff)
 	}
 
-	if diff := cmp.Diff(
-		expected.childMonitoredResources.GetAsMap(),
-		actual.childMonitoredResources.GetAsMap(),
-	); diff != "" {
+	if diff := cmp.Diff(expected.childMonitoredResources, actual.childMonitoredResources); diff != "" {
 		t.Error(diff)
 	}
 
-	if diff := cmp.Diff(
-		expected.missingMonitoredResources.GetAsMap(),
-		actual.missingMonitoredResources.GetAsMap(),
-	); diff != "" {
+	if diff := cmp.Diff(expected.missingMonitoredResources, actual.missingMonitoredResources); diff != "" {
 		t.Error(diff)
 	}
 
-	if diff := cmp.Diff(
-		expected.unknownMonitoredResources.GetAsMap(),
-		actual.unknownMonitoredResources.GetAsMap(),
-	); diff != "" {
+	if diff := cmp.Diff(expected.unknownMonitoredResources, actual.unknownMonitoredResources); diff != "" {
 		t.Error(diff)
 	}
 }

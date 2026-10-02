@@ -41,35 +41,32 @@ func (w *Watcher) UpdateMonitoredResources(_ context.Context, logger *slog.Logge
 	logger.Info("Running resource monitor loop")
 	client := pb.NewLiveStatusServiceClient(conn)
 
-	for _, cluster := range w.Clusters.GetAll() {
-		cluster.InvalidateDiscoveryClient()
-		for applicationInstanceUpdate := range cluster.GetApplicationInstanceUpdates(localContext) {
-			replaceResourcesRequest, errors := pb.ToReplaceMonitoredResourceRequest(*applicationInstanceUpdate)
+	for applicationInstanceUpdate := range w.Clusters.ApplicationInstanceUpdates(localContext) {
+		replaceResourcesRequest, errors := pb.ToReplaceMonitoredResourceRequest(*applicationInstanceUpdate)
 
-			if len(errors) > 0 {
-				for _, err := range errors {
-					logger.Error("Error converting resource to update", slog.Any("error", err))
-				}
+		if len(errors) > 0 {
+			for _, err := range errors {
+				logger.Error("Error converting resource to update", slog.Any("error", err))
 			}
+		}
 
-			logger.Info("Sending resource replacement for desired state",
-				slog.Int("presentMonitoredResources", len(replaceResourcesRequest.PresentMonitoredResources)),
-				slog.Int("childMonitoredResources", len(replaceResourcesRequest.ChildMonitoredResources)),
-				slog.Int("missingMonitoredResources", len(replaceResourcesRequest.MissingMonitoredResources)),
-				slog.Int("unknownMonitoredResources", len(replaceResourcesRequest.UnknownMonitoredResources)),
-				slog.Any("key", replaceResourcesRequest.ApplicationInstanceId),
-			)
+		logger.Info("Sending resource replacement for desired state",
+			slog.Int("presentMonitoredResources", len(replaceResourcesRequest.PresentMonitoredResources)),
+			slog.Int("childMonitoredResources", len(replaceResourcesRequest.ChildMonitoredResources)),
+			slog.Int("missingMonitoredResources", len(replaceResourcesRequest.MissingMonitoredResources)),
+			slog.Int("unknownMonitoredResources", len(replaceResourcesRequest.UnknownMonitoredResources)),
+			slog.Any("key", replaceResourcesRequest.ApplicationInstanceId),
+		)
 
-			replaceMonitoredResourcesStart := time.Now()
-			_, err := client.ReplaceMonitoredResources(localContext, replaceResourcesRequest)
-			logger.Info(
-				"ReplaceMonitoredResources completed",
-				slog.Duration("duration", time.Now().Sub(replaceMonitoredResourcesStart)),
-			)
+		replaceMonitoredResourcesStart := time.Now()
+		_, err := client.ReplaceMonitoredResources(localContext, replaceResourcesRequest)
+		logger.Info(
+			"ReplaceMonitoredResources completed",
+			slog.Duration("duration", time.Now().Sub(replaceMonitoredResourcesStart)),
+		)
 
-			if err != nil {
-				logger.Error("Error sending resource updates", slog.Any("error", err))
-			}
+		if err != nil {
+			logger.Error("Error sending resource updates", slog.Any("error", err))
 		}
 	}
 }
