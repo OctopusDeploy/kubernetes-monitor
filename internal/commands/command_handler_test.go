@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"maps"
+	"slices"
 	"testing"
 
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache"
@@ -16,7 +16,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/yaml"
 
 	engineHealth "github.com/argoproj/argo-cd/gitops-engine/v3/pkg/health"
@@ -47,49 +46,16 @@ func (b *BasicUpdater) Replace(_ context.Context, replacement *cluster.Applicati
 }
 
 func TestHandle_UpdateDesiredResourcesCommand_UpdatesApplicationInstance(t *testing.T) {
-	commandHandler := getCommandHandler(cluster.NoOpUpdater{})
+	commandHandler := getCommandHandler(t, cluster.NoOpUpdater{})
 
 	expectedResource := cluster.NewDesiredResourceBuilder().Build()
-	serializedManifest, _ := yaml.Marshal(expectedResource.Manifest.Object)
 
-	pbResource := &pb.DesiredResource{
-		DesiredResourceId: &pb.DesiredResourceId{Value: string(expectedResource.Id)},
-		ResourceDetails: &pb.DesiredResourceDetails{
-			Name:             expectedResource.Details.Name,
-			AssumedNamespace: expectedResource.Details.Namespace,
-			GroupVersionKind: &pb.GroupVersionKind{
-				Group:   "",
-				Version: expectedResource.Details.ManifestType.APIVersion,
-				Kind:    expectedResource.Details.ManifestType.Kind,
-			},
-		},
-		Manifest: &pb.YamlManifest{Value: string(serializedManifest)},
-	}
+	updateDesiredResources(t, commandHandler, *expectedResource.Version, expectedResource)
 
-	_ = commandHandler.handle(&pb.ServerToClientStream{
-		Command: &pb.ServerToClientStream_UpdateDesiredResourcesCommand{
-			UpdateDesiredResourcesCommand: &pb.UpdateDesiredResourcesCommand{
-				ApplicationInstanceId: &pb.ApplicationInstanceId{Value: ApplicationInstanceId},
-				ClusterId:             &pb.ClusterId{Value: ClusterId},
-				Version:               &pb.Version{Value: string(*expectedResource.Version)},
-				DesiredResources:      []*pb.DesiredResource{pbResource},
-			},
-		},
-	})
-
-	actualCluster, err := commandHandler.Clusters.GetCluster(ClusterId)
-	if err != nil {
-		t.Errorf("Cluster with ID %s not found in %v", ClusterId, maps.Keys(commandHandler.Clusters.GetAll()))
-	}
-
-	actual, ok := actualCluster.ApplicationInstances.Get(ApplicationInstanceId)
-
-	if !ok {
-		t.Errorf("Updated application instance not found")
-	}
-
-	if diff := cmp.Diff([]*cluster.DesiredResource{&expectedResource}, actual.GetDesiredResources()); !ok ||
-		diff != "" {
+	if diff := cmp.Diff(
+		[]cluster.DesiredResourceId{expectedResource.Id},
+		desiredResourceIds(t, commandHandler),
+	); diff != "" {
 		t.Error(diff)
 	}
 }
@@ -97,7 +63,7 @@ func TestHandle_UpdateDesiredResourcesCommand_UpdatesApplicationInstance(t *test
 func TestHandle_UpdateDesiredResourcesCommand_SendsMonitoredResourcesUpdate(t *testing.T) {
 	updater := BasicUpdater{}
 
-	commandHandler := getCommandHandler(&updater)
+	commandHandler := getCommandHandler(t, &updater)
 
 	expectedResource := cluster.NewDesiredResourceBuilder().Build()
 	serializedManifest, _ := yaml.Marshal(expectedResource.Manifest.Object)
@@ -155,7 +121,7 @@ func TestHandle_UpdateDesiredResourcesCommand_SendsMonitoredResourcesUpdate(t *t
 }
 
 func TestHandle_PruneOtherVersionsCommand_RemovesOldVersions(t *testing.T) {
-	commandHandler := getCommandHandler(cluster.NoOpUpdater{})
+	commandHandler := getCommandHandler(t, cluster.NoOpUpdater{})
 
 	v1Resource := cluster.NewDesiredResourceBuilder().
 		WithName("version-1").
@@ -167,67 +133,38 @@ func TestHandle_PruneOtherVersionsCommand_RemovesOldVersions(t *testing.T) {
 		WithVersion("to keep").
 		Build()
 
-	applicationInstance := cluster.NewApplicationInstanceBuilder().
-		WithDesiredResources([]*cluster.DesiredResource{&v1Resource, &v2Resource}).
-		WithClusterId(ClusterId).
-		Build()
+	updateDesiredResources(t, commandHandler, "will not keep", v1Resource)
+	updateDesiredResources(t, commandHandler, "to keep", v2Resource)
 
-	actualCluster, err := commandHandler.Clusters.GetCluster(ClusterId)
-	if err != nil {
-		t.Errorf("Cluster with ID %s not found in %v", ClusterId, maps.Keys(commandHandler.Clusters.GetAll()))
-	}
-
-	actualCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
-
-	_ = commandHandler.handle(&pb.ServerToClientStream{
+	handle(t, commandHandler, &pb.ServerToClientStream{
 		Command: &pb.ServerToClientStream_PruneOtherVersionsCommand{
 			PruneOtherVersionsCommand: &pb.PruneOtherVersionsCommand{
-				ApplicationInstanceId: &pb.ApplicationInstanceId{
-					Value: string(applicationInstance.ApplicationInstanceId),
-				},
-				ClusterId: &pb.ClusterId{Value: ClusterId},
-				Version:   &pb.Version{Value: "to keep"},
+				ApplicationInstanceId: &pb.ApplicationInstanceId{Value: ApplicationInstanceId},
+				ClusterId:             &pb.ClusterId{Value: ClusterId},
+				Version:               &pb.Version{Value: "to keep"},
 			},
 		},
 	})
 
-	actual, ok := actualCluster.ApplicationInstances.Get(applicationInstance.ApplicationInstanceId)
-
-	if !ok {
-		t.Errorf("Updated application instance not found")
-	}
-
-	if diff := cmp.Diff([]*cluster.DesiredResource{&v2Resource}, actual.GetDesiredResources()); !ok || diff != "" {
+	if diff := cmp.Diff([]cluster.DesiredResourceId{v2Resource.Id}, desiredResourceIds(t, commandHandler)); diff != "" {
 		t.Error(diff)
 	}
 }
 
 func TestHandle_DeleteDesiredResourcesCommand_OnlyRemovesListedResources(t *testing.T) {
-	commandHandler := getCommandHandler(cluster.NoOpUpdater{})
+	commandHandler := getCommandHandler(t, cluster.NoOpUpdater{})
 
 	r1 := cluster.NewDesiredResourceBuilder().WithName("resource-1").Build()
 	r2 := cluster.NewDesiredResourceBuilder().WithName("resource-2").Build()
 	r3 := cluster.NewDesiredResourceBuilder().WithName("resource-3").Build()
 
-	applicationInstance := cluster.NewApplicationInstanceBuilder().
-		WithDesiredResources([]*cluster.DesiredResource{&r1, &r2, &r3}).
-		WithClusterId(ClusterId).
-		Build()
+	updateDesiredResources(t, commandHandler, "v1", r1, r2, r3)
 
-	actualCluster, err := commandHandler.Clusters.GetCluster(ClusterId)
-	if err != nil {
-		t.Errorf("Cluster with ID %s not found in %v", ClusterId, maps.Keys(commandHandler.Clusters.GetAll()))
-	}
-
-	actualCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
-
-	_ = commandHandler.handle(&pb.ServerToClientStream{
+	handle(t, commandHandler, &pb.ServerToClientStream{
 		Command: &pb.ServerToClientStream_DeleteDesiredResourcesCommand{
 			DeleteDesiredResourcesCommand: &pb.DeleteDesiredResourcesCommand{
-				ApplicationInstanceId: &pb.ApplicationInstanceId{
-					Value: string(applicationInstance.ApplicationInstanceId),
-				},
-				ClusterId: &pb.ClusterId{Value: ClusterId},
+				ApplicationInstanceId: &pb.ApplicationInstanceId{Value: ApplicationInstanceId},
+				ClusterId:             &pb.ClusterId{Value: ClusterId},
 				ResourceIds: []*pb.DesiredResourceId{
 					{Value: string(r1.Id)},
 					{Value: string(r3.Id)},
@@ -236,12 +173,7 @@ func TestHandle_DeleteDesiredResourcesCommand_OnlyRemovesListedResources(t *test
 		},
 	})
 
-	actual, ok := actualCluster.ApplicationInstances.Get(applicationInstance.ApplicationInstanceId)
-	if !ok {
-		t.Errorf("Application instance not found")
-	}
-
-	if diff := cmp.Diff([]*cluster.DesiredResource{&r2}, actual.GetDesiredResources()); diff != "" {
+	if diff := cmp.Diff([]cluster.DesiredResourceId{r2.Id}, desiredResourceIds(t, commandHandler)); diff != "" {
 		t.Error(diff)
 	}
 }
@@ -249,25 +181,15 @@ func TestHandle_DeleteDesiredResourcesCommand_OnlyRemovesListedResources(t *test
 func TestHandle_ReplaceDesiredResourcesCommand(t *testing.T) {
 	t.Run("Drops resources absent from the list", func(t *testing.T) {
 		updater := BasicUpdater{}
-		commandHandler := getCommandHandler(&updater)
+		commandHandler := getCommandHandler(t, &updater)
 
 		kept := cluster.NewDesiredResourceBuilder().WithName("kept").Build()
 		dropped := cluster.NewDesiredResourceBuilder().WithName("dropped").Build()
 
-		applicationInstance := cluster.NewApplicationInstanceBuilder().
-			WithApplicationInstanceId(ApplicationInstanceId).
-			WithDesiredResources([]*cluster.DesiredResource{&kept, &dropped}).
-			WithClusterId(ClusterId).
-			Build()
+		updateDesiredResources(t, commandHandler, "v1", kept, dropped)
+		updater.receivedUpdate = nil
 
-		actualCluster, err := commandHandler.Clusters.GetCluster(ClusterId)
-		if err != nil {
-			t.Fatalf("Cluster with ID %s not found in %v", ClusterId, maps.Keys(commandHandler.Clusters.GetAll()))
-		}
-
-		actualCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
-
-		_ = commandHandler.handle(&pb.ServerToClientStream{
+		handle(t, commandHandler, &pb.ServerToClientStream{
 			Command: &pb.ServerToClientStream_ReplaceDesiredResourcesCommand{
 				ReplaceDesiredResourcesCommand: &pb.ReplaceDesiredResourcesCommand{
 					ApplicationInstanceId: &pb.ApplicationInstanceId{Value: ApplicationInstanceId},
@@ -277,54 +199,34 @@ func TestHandle_ReplaceDesiredResourcesCommand(t *testing.T) {
 			},
 		})
 
-		actual, ok := actualCluster.ApplicationInstances.Get(ApplicationInstanceId)
-		if !ok {
-			t.Fatal("Application instance not found")
-		}
-
-		// A complete list carries no deployment version, so what arrives has no version rather than the
-		// one it was seeded with.
-		expected := cluster.NewDesiredResourceBuilder().
-			WithId(kept.Id).
-			WithName("kept").
-			WithoutVersion().
-			Build()
-
-		if diff := cmp.Diff([]*cluster.DesiredResource{&expected}, actual.GetDesiredResources()); diff != "" {
-			t.Error(diff)
-		}
-
 		// A complete list goes to Server as a replacement, not a delta — a delta could never tell Server
 		// that "dropped" is gone.
 		if updater.receivedReplacement == nil {
-			t.Error("Expected a replacement to be sent")
+			t.Fatal("Expected a replacement to be sent")
 		}
 
 		if updater.receivedUpdate != nil {
 			t.Error("Expected no incremental update to be sent")
 		}
+
+		if diff := cmp.Diff([]cluster.DesiredResourceId{kept.Id}, missingIds(updater.receivedReplacement)); diff != "" {
+			t.Error(diff)
+		}
+
+		if diff := cmp.Diff([]cluster.DesiredResourceId{kept.Id}, desiredResourceIds(t, commandHandler)); diff != "" {
+			t.Error(diff)
+		}
 	})
 
 	t.Run("Empty list clears the application instance", func(t *testing.T) {
 		updater := BasicUpdater{}
-		commandHandler := getCommandHandler(&updater)
+		commandHandler := getCommandHandler(t, &updater)
 
 		existing := cluster.NewDesiredResourceBuilder().WithName("existing").Build()
 
-		applicationInstance := cluster.NewApplicationInstanceBuilder().
-			WithApplicationInstanceId(ApplicationInstanceId).
-			WithDesiredResources([]*cluster.DesiredResource{&existing}).
-			WithClusterId(ClusterId).
-			Build()
+		updateDesiredResources(t, commandHandler, "v1", existing)
 
-		actualCluster, err := commandHandler.Clusters.GetCluster(ClusterId)
-		if err != nil {
-			t.Fatalf("Cluster with ID %s not found in %v", ClusterId, maps.Keys(commandHandler.Clusters.GetAll()))
-		}
-
-		actualCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
-
-		_ = commandHandler.handle(&pb.ServerToClientStream{
+		handle(t, commandHandler, &pb.ServerToClientStream{
 			Command: &pb.ServerToClientStream_ReplaceDesiredResourcesCommand{
 				ReplaceDesiredResourcesCommand: &pb.ReplaceDesiredResourcesCommand{
 					ApplicationInstanceId: &pb.ApplicationInstanceId{Value: ApplicationInstanceId},
@@ -334,13 +236,8 @@ func TestHandle_ReplaceDesiredResourcesCommand(t *testing.T) {
 			},
 		})
 
-		actual, ok := actualCluster.ApplicationInstances.Get(ApplicationInstanceId)
-		if !ok {
-			t.Fatal("Application instance not found")
-		}
-
-		if count := len(actual.GetDesiredResources()); count != 0 {
-			t.Errorf("Expected no desired resources, but got %d", count)
+		if ids := desiredResourceIds(t, commandHandler); len(ids) != 0 {
+			t.Errorf("Expected no desired resources, but got %v", ids)
 		}
 
 		// An empty complete list still has to reach Server, otherwise it keeps the state forever.
@@ -354,6 +251,65 @@ func TestHandle_ReplaceDesiredResourcesCommand(t *testing.T) {
 	})
 }
 
+func handle(t *testing.T, commandHandler *CommandHandler, command *pb.ServerToClientStream) {
+	t.Helper()
+	if err := commandHandler.handle(command); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+}
+
+func updateDesiredResources(
+	t *testing.T,
+	commandHandler *CommandHandler,
+	version cluster.Version,
+	resources ...cluster.DesiredResource,
+) {
+	t.Helper()
+	pbResources := make([]*pb.DesiredResource, 0, len(resources))
+	for _, resource := range resources {
+		pbResources = append(pbResources, toPbDesiredResource(resource))
+	}
+
+	handle(t, commandHandler, &pb.ServerToClientStream{
+		Command: &pb.ServerToClientStream_UpdateDesiredResourcesCommand{
+			UpdateDesiredResourcesCommand: &pb.UpdateDesiredResourcesCommand{
+				ApplicationInstanceId: &pb.ApplicationInstanceId{Value: ApplicationInstanceId},
+				ClusterId:             &pb.ClusterId{Value: ClusterId},
+				Version:               &pb.Version{Value: string(version)},
+				DesiredResources:      pbResources,
+			},
+		},
+	})
+}
+
+// The mock cache holds no live objects, so a sweep reports every desired resource as Missing.
+func desiredResourceIds(t *testing.T, commandHandler *CommandHandler) []cluster.DesiredResourceId {
+	t.Helper()
+	var ids []cluster.DesiredResourceId
+	found := false
+	for update := range commandHandler.Clusters.ApplicationInstanceUpdates(t.Context()) {
+		if update.ApplicationInstanceId != ApplicationInstanceId {
+			continue
+		}
+		found = true
+		ids = append(ids, missingIds(update)...)
+	}
+	if !found {
+		t.Fatal("Application instance not found")
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+func missingIds(changes *cluster.ApplicationInstanceChanges) []cluster.DesiredResourceId {
+	var ids []cluster.DesiredResourceId
+	for _, missing := range changes.MissingMonitoredResources {
+		ids = append(ids, missing.DesiredResourceId)
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 type MockCachedDiscoveryClient struct {
 	*fakediscovery.FakeDiscovery
 }
@@ -361,12 +317,10 @@ type MockCachedDiscoveryClient struct {
 func (m *MockCachedDiscoveryClient) Fresh() bool { return true }
 func (m *MockCachedDiscoveryClient) Invalidate() {}
 
-func getCommandHandler(updateMonitoredResourcesFunc cluster.MonitoredResourcesUpdater) *CommandHandler {
+func getCommandHandler(t *testing.T, updater cluster.MonitoredResourcesUpdater) *CommandHandler {
 	mockCache := mocks.ClusterCache{}
 	clusterInfo := cache.ClusterInfo{Server: ClusterHost}
 	mockCache.On("EnsureSynced").Return(nil)
-	mockCache.On("OnResourceUpdated", mock.AnythingOfType("cache.OnResourceUpdatedHandler")).
-		Return(cache.Unsubscribe(func() {}))
 	// A synced cache knows the built-in Deployment type used by these tests; an empty list
 	// would be read as "the type's CRD is gone" and reclassify the resource away from Missing.
 	mockCache.On("GetAPIResources").Return([]kube.APIResourceInfo{
@@ -381,36 +335,19 @@ func getCommandHandler(updateMonitoredResourcesFunc cluster.MonitoredResourcesUp
 		mock.AnythingOfType("func(*cache.Resource, map[kube.ResourceKey]*cache.Resource) bool"),
 	)
 	mockCache.On("GetClusterInfo").Return(clusterInfo)
-	mockClientSet := fake.NewClientset()
 
-	applicationInstanceList := cluster.NewApplicationInstanceList()
-	restConfig := &rest.Config{Host: ClusterHost}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	mockDiscoveryClient := &MockCachedDiscoveryClient{}
-	clusters := cluster.NewClusterList(
-		context.Background(),
-		restConfig,
-		logger,
-		updateMonitoredResourcesFunc,
-		nil,
-		false,
-	)
-	mockCluster := cluster.NewCluster(
-		ClusterId,
-		applicationInstanceList,
-		logger,
-		&mockCache,
-		nil,
-		mockDiscoveryClient,
-		mockClientSet,
-		dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
-		updateMonitoredResourcesFunc,
-		false,
-		nil,
-	)
-	clusters.SetCluster(mockCluster)
+	clusters := cluster.NewClusterListFromConnection(t.Context(), logger, updater, cluster.ClusterConnection{
+		Cache:         &mockCache,
+		Discovery:     &MockCachedDiscoveryClient{},
+		ClientSet:     fake.NewClientset(),
+		DynamicClient: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
+	})
+	if _, err := clusters.EnsureCluster(t.Context(), ClusterId); err != nil {
+		t.Fatalf("EnsureCluster: %v", err)
+	}
 
-	return NewCommandHandler(&clusters, nil, context.Background(), logger)
+	return NewCommandHandler(clusters, nil, t.Context(), logger)
 }
 
 func toPbDesiredResource(resource cluster.DesiredResource) *pb.DesiredResource {

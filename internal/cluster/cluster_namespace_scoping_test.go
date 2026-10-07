@@ -2,10 +2,9 @@ package cluster
 
 import (
 	"fmt"
-	"io"
-	"log/slog"
 	"testing"
 
+	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache"
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache/mocks"
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/kube"
 	"github.com/stretchr/testify/assert"
@@ -47,14 +46,11 @@ func TestGetMonitoredResources_SkipsClusterScopedInNamespaceScopedMode(t *testin
 		mock.AnythingOfType("func(*cache.Resource, map[kube.ResourceKey]*cache.Resource) bool"),
 	).Return()
 
-	c := &Cluster{
-		ClusterId:            "cluster-id",
-		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
-		clusterCache:         &mockCache,
-		namespaceScopedMode:  true,
-		targetNamespaces:     map[string]struct{}{"watched": {}},
-		ApplicationInstances: NewApplicationInstanceList(),
-	}
+	mockCache.On("GetClusterInfo").Return(cache.ClusterInfo{})
+	shared := newTestSharedCluster(t, ClusterConnection{
+		Cache:            &mockCache,
+		TargetNamespaces: []string{"watched"},
+	})
 
 	namespacedDesired := NewDesiredResourceBuilder().
 		WithId("namespaced-id").
@@ -90,7 +86,12 @@ func TestGetMonitoredResources_SkipsClusterScopedInNamespaceScopedMode(t *testin
 		clusterScopedDesired.ResourceKey(): &clusterScopedDesired,
 	}
 
-	_, _, missing, unknown, err := c.getMonitoredResources(desiredResources, crypto.HashSalt("salt"), true)
+	_, _, missing, unknown, err := shared.getMonitoredResources(
+		testClusterId,
+		desiredResources,
+		crypto.HashSalt("salt"),
+		true,
+	)
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -136,14 +137,11 @@ func TestGetMonitoredResources_MarksForbiddenResourcesAsUnknown(t *testing.T) {
 		mock.AnythingOfType("func(*cache.Resource, map[kube.ResourceKey]*cache.Resource) bool"),
 	).Return()
 
-	c := &Cluster{
-		ClusterId:            "cluster-id",
-		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
-		clusterCache:         &mockCache,
-		namespaceScopedMode:  true,
-		targetNamespaces:     map[string]struct{}{"watched": {}},
-		ApplicationInstances: NewApplicationInstanceList(),
-	}
+	mockCache.On("GetClusterInfo").Return(cache.ClusterInfo{})
+	shared := newTestSharedCluster(t, ClusterConnection{
+		Cache:            &mockCache,
+		TargetNamespaces: []string{"watched"},
+	})
 
 	permittedDesired := NewDesiredResourceBuilder().
 		WithId("permitted-id").
@@ -180,7 +178,12 @@ func TestGetMonitoredResources_MarksForbiddenResourcesAsUnknown(t *testing.T) {
 		forbiddenDesired.ResourceKey(): &forbiddenDesired,
 	}
 
-	_, _, missing, unknown, err := c.getMonitoredResources(desiredResources, crypto.HashSalt("salt"), true)
+	_, _, missing, unknown, err := shared.getMonitoredResources(
+		testClusterId,
+		desiredResources,
+		crypto.HashSalt("salt"),
+		true,
+	)
 	if !assert.NoError(t, err) {
 		return
 	}
@@ -240,14 +243,12 @@ func TestGetMonitoredResources_SkipsOutOfScopeNamespacesBeforeGetManagedLiveObjs
 				mock.AnythingOfType("func(*cache.Resource, map[kube.ResourceKey]*cache.Resource) bool"),
 			).Return()
 
-			c := &Cluster{
-				ClusterId:            "cluster-id",
-				logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
-				clusterCache:         &mockCache,
-				namespaceScopedMode:  tt.namespaceScopedMode,
-				targetNamespaces:     map[string]struct{}{"watched": {}},
-				ApplicationInstances: NewApplicationInstanceList(),
-			}
+			mockCache.On("GetClusterInfo").Return(cache.ClusterInfo{})
+			shared := newTestSharedCluster(t, ClusterConnection{
+				Cache:                  &mockCache,
+				TargetNamespaces:       []string{"watched"},
+				ClusterScopedResources: !tt.namespaceScopedMode,
+			})
 
 			inScopeDesired := NewDesiredResourceBuilder().
 				WithId("in-scope-id").
@@ -282,7 +283,12 @@ func TestGetMonitoredResources_SkipsOutOfScopeNamespacesBeforeGetManagedLiveObjs
 				outOfScopeDesired.ResourceKey(): &outOfScopeDesired,
 			}
 
-			_, _, missing, unknown, err := c.getMonitoredResources(desiredResources, crypto.HashSalt("salt"), true)
+			_, _, missing, unknown, err := shared.getMonitoredResources(
+				testClusterId,
+				desiredResources,
+				crypto.HashSalt("salt"),
+				true,
+			)
 			if !assert.NoError(t, err) {
 				return
 			}

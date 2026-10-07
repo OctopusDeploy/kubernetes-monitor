@@ -23,7 +23,7 @@ func TestGetEvents(t *testing.T) {
 			return context.WithValue(ctx, testContextKey("testCluster"), testCluster)
 		}).
 		Assess("get events", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			testCluster := ctx.Value(testContextKey("testCluster")).(*cluster.Cluster)
+			testCluster := ctx.Value(testContextKey("testCluster")).(*testTarget)
 
 			returnedEvents, err := testCluster.GetEvents(cfg.Namespace(), testPodName, "Pod", ctx)
 			if err != nil {
