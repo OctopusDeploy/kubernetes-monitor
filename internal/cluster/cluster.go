@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"slices"
 	"strings"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 	"github.com/mattbaird/jsonpatch"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,15 +30,15 @@ const name = "github.com/octopusdeploy/kubernetes-monitor/internal/cluster"
 var tracer = otel.Tracer(name)
 
 // Cluster is one Octopus machine rather than a Kubernetes cluster: many machines can monitor the same cluster
-// through a sharedCluster. A single goroutine owns its application instances, so commands, sweeps and
-// resource changes can't interleave.
+// through a sharedCluster. A single goroutine owns its clusterState, so commands, sweeps and resource changes
+// can't interleave; Cluster sends them there and passes the changes they return on to Octopus.
 type Cluster struct {
 	ClusterId ClusterId
 
 	logger  *slog.Logger
 	shared  *sharedCluster
 	updater MonitoredResourcesUpdater
-	mailbox mailbox[ApplicationInstanceList]
+	mailbox mailbox[clusterState]
 }
 
 // ManifestResolver returns the unstructured manifest for a cache.Resource.
@@ -91,7 +89,7 @@ func newCluster(
 		logger:    logger.With(slog.Any("clusterId", id)),
 		shared:    shared,
 		updater:   updater,
-		mailbox:   newMailbox[ApplicationInstanceList](ctx.Done()),
+		mailbox:   newMailbox[clusterState](ctx.Done()),
 	}
 
 	changes := newChangeQueue(ctx)
@@ -105,15 +103,15 @@ func newCluster(
 }
 
 func (c *Cluster) run(ctx context.Context, changes <-chan resourceChange) {
-	applicationInstances := NewApplicationInstanceList()
+	state := newClusterState(c.ClusterId, c.logger, c.shared)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case op := <-c.mailbox.ops:
-			op(applicationInstances)
+			op(state)
 		case change := <-changes:
-			c.applyResourceChange(ctx, applicationInstances, change)
+			c.sendResourceChangeUpdates(ctx, state.applyResourceChange(ctx, change))
 		}
 	}
 }
@@ -123,11 +121,8 @@ func (c *Cluster) run(ctx context.Context, changes <-chan resourceChange) {
 func (c *Cluster) DeleteDesiredResourcesExceptForVersion(
 	ctx context.Context, applicationInstanceId ApplicationInstanceId, versionToKeep Version,
 ) error {
-	return do(ctx, c.mailbox, func(applicationInstances *ApplicationInstanceList) {
-		if applicationInstance, ok := applicationInstances.Get(applicationInstanceId); ok {
-			applicationInstance.DeleteDesiredResourcesExceptForVersion(versionToKeep)
-			c.publishInterests(ctx, applicationInstances)
-		}
+	return do(ctx, c.mailbox, func(state *clusterState) {
+		state.deleteDesiredResourcesExceptForVersion(ctx, applicationInstanceId, versionToKeep)
 	})
 }
 
@@ -136,11 +131,8 @@ func (c *Cluster) DeleteDesiredResourcesExceptForVersion(
 func (c *Cluster) DeleteDesiredResources(
 	ctx context.Context, applicationInstanceId ApplicationInstanceId, resourceIds []DesiredResourceId,
 ) error {
-	return do(ctx, c.mailbox, func(applicationInstances *ApplicationInstanceList) {
-		if applicationInstance, ok := applicationInstances.Get(applicationInstanceId); ok {
-			applicationInstance.DeleteDesiredResources(resourceIds)
-			c.publishInterests(ctx, applicationInstances)
-		}
+	return do(ctx, c.mailbox, func(state *clusterState) {
+		state.deleteDesiredResources(ctx, applicationInstanceId, resourceIds)
 	})
 }
 
@@ -160,14 +152,8 @@ func (c *Cluster) MergeDesiredResources(
 	}
 
 	var update *ApplicationInstanceChanges
-	err := call(ctx, c.mailbox, func(applicationInstances *ApplicationInstanceList) (err error) {
-		update, err = c.mergeDesiredResources(
-			ctx,
-			applicationInstances,
-			applicationInstanceId,
-			desiredResources,
-			hashSalt,
-		)
+	err := call(ctx, c.mailbox, func(state *clusterState) (err error) {
+		update, err = state.mergeDesiredResources(ctx, applicationInstanceId, desiredResources, hashSalt)
 		return err
 	})
 	if err != nil {
@@ -191,9 +177,8 @@ func (c *Cluster) ReplaceDesiredResources(
 	defer span.End()
 
 	var replacement *ApplicationInstanceChanges
-	err := call(ctx, c.mailbox, func(applicationInstances *ApplicationInstanceList) (err error) {
-		replacement, err = c.replaceDesiredResources(
-			ctx, applicationInstances, applicationInstanceId, desiredResources, hashSalt)
+	err := call(ctx, c.mailbox, func(state *clusterState) (err error) {
+		replacement, err = state.replaceDesiredResources(ctx, applicationInstanceId, desiredResources, hashSalt)
 		return err
 	})
 	if err != nil {
@@ -207,28 +192,8 @@ func (c *Cluster) ReplaceDesiredResources(
 
 // applicationInstanceUpdates expects the caller to have synced the shared cluster, once for every target.
 func (c *Cluster) applicationInstanceUpdates(ctx context.Context) ([]*ApplicationInstanceChanges, error) {
-	return ask(ctx, c.mailbox, func(applicationInstances *ApplicationInstanceList) []*ApplicationInstanceChanges {
-		var updates []*ApplicationInstanceChanges
-		for applicationInstanceId, applicationInstance := range applicationInstances.All() {
-			ctx, span := tracer.Start(ctx, "Cluster.applicationInstanceUpdates")
-			span.SetAttributes(attribute.String("applicationInstanceId", string(applicationInstanceId)))
-			span.SetAttributes(attribute.String("clusterId", string(c.ClusterId)))
-
-			if err := applicationInstance.ReplaceMonitoredResourcesFromCluster(ctx, c.ClusterId, c.shared); err != nil {
-				c.logger.
-					With(slog.Any("error", err)).
-					With(slog.String("applicationInstanceId", string(applicationInstanceId))).
-					Error("Failed to get monitored resources")
-			} else {
-				updates = append(updates, applicationInstance.MonitoredResourceChanges(c.ClusterId))
-			}
-			span.End()
-		}
-
-		// Republishing every sweep drops interests the index inherited while listing that this target never
-		// went on to monitor, so they can't accumulate.
-		c.publishInterests(ctx, applicationInstances)
-		return updates
+	return ask(ctx, c.mailbox, func(state *clusterState) []*ApplicationInstanceChanges {
+		return state.monitoredResourceUpdates(ctx)
 	})
 }
 
@@ -261,193 +226,11 @@ func (c *Cluster) logApplicationInstanceChanges(message string, changes *Applica
 	)
 }
 
-func (c *Cluster) mergeDesiredResources(
-	ctx context.Context, applicationInstances *ApplicationInstanceList,
-	applicationInstanceId ApplicationInstanceId,
-	desiredResources map[kube.ResourceKey]*DesiredResource,
-	hashSalt crypto.HashSalt,
-) (*ApplicationInstanceChanges, error) {
-	ctx, span := tracer.Start(ctx, "Cluster.mergeDesiredResources")
-	defer span.End()
-	c.setDesiredResourceAttributes(span, applicationInstanceId, desiredResources)
-
-	desiredResources = c.resolveNamespaces(ctx, desiredResources)
-	desiredResourceIds := make([]DesiredResourceId, 0, len(desiredResources))
-	for _, desiredResource := range desiredResources {
-		desiredResourceIds = append(desiredResourceIds, desiredResource.Id)
+func (c *Cluster) sendResourceChangeUpdates(ctx context.Context, updates []*ApplicationInstanceChanges) {
+	for _, update := range updates {
+		c.logApplicationInstanceChanges("Sending resource updates due to updated monitored resource", update)
+		c.updater.Update(ctx, update)
 	}
-
-	applicationInstance := applicationInstances.getOrCreateApplicationInstance(applicationInstanceId, hashSalt)
-	applicationInstance.MergeDesiredResources(ctx, c.ClusterId, desiredResources)
-	if err := c.rescan(ctx, applicationInstances, applicationInstance); err != nil {
-		return nil, err
-	}
-
-	// Resolve the UIDs of any desired resources
-	// Only necessary for desired resources that are present
-	isIncoming := func(id DesiredResourceId) bool { return slices.Contains(desiredResourceIds, id) }
-
-	var desiredAndPresentResources []*PresentMonitoredResource
-	desiredAndPresentResourceUids := make([]types.UID, 0, len(applicationInstance.presentMonitoredResources))
-	for id, presentResource := range applicationInstance.presentMonitoredResources {
-		if isIncoming(id) {
-			desiredAndPresentResources = append(desiredAndPresentResources, presentResource)
-			desiredAndPresentResourceUids = append(desiredAndPresentResourceUids, presentResource.ResourceId)
-		}
-	}
-
-	var childResources []*ChildMonitoredResource
-	for _, childResource := range applicationInstance.childMonitoredResources {
-		if slices.Contains(desiredAndPresentResourceUids, childResource.RootOwnerId) {
-			childResources = append(childResources, childResource)
-		}
-	}
-
-	var missingResources []*MissingMonitoredResource
-	for id, missingResource := range applicationInstance.missingMonitoredResources {
-		if isIncoming(id) {
-			missingResources = append(missingResources, missingResource)
-		}
-	}
-
-	var unknownResources []*UnknownMonitoredResource
-	for id, unknownResource := range applicationInstance.unknownMonitoredResources {
-		if isIncoming(id) {
-			unknownResources = append(unknownResources, unknownResource)
-		}
-	}
-
-	return &ApplicationInstanceChanges{
-		ApplicationInstanceId:     applicationInstance.ApplicationInstanceId,
-		ClusterId:                 c.ClusterId,
-		PresentMonitoredResources: desiredAndPresentResources,
-		ChildMonitoredResources:   childResources,
-		MissingMonitoredResources: missingResources,
-		UnknownMonitoredResources: unknownResources,
-	}, nil
-}
-
-func (c *Cluster) replaceDesiredResources(
-	ctx context.Context, applicationInstances *ApplicationInstanceList,
-	applicationInstanceId ApplicationInstanceId,
-	desiredResources map[kube.ResourceKey]*DesiredResource,
-	hashSalt crypto.HashSalt,
-) (*ApplicationInstanceChanges, error) {
-	ctx, span := tracer.Start(ctx, "Cluster.replaceDesiredResources")
-	defer span.End()
-	c.setDesiredResourceAttributes(span, applicationInstanceId, desiredResources)
-
-	desiredResources = c.resolveNamespaces(ctx, desiredResources)
-
-	applicationInstance := applicationInstances.getOrCreateApplicationInstance(applicationInstanceId, hashSalt)
-	applicationInstance.ReplaceDesiredResources(ctx, c.ClusterId, desiredResources)
-	if err := c.rescan(ctx, applicationInstances, applicationInstance); err != nil {
-		return nil, err
-	}
-
-	return applicationInstance.MonitoredResourceChanges(c.ClusterId), nil
-}
-
-// rescan publishes the target's interests before syncing so that, on the cluster's first sync, the cache
-// keeps the manifests of the resources just desired.
-func (c *Cluster) rescan(
-	ctx context.Context, applicationInstances *ApplicationInstanceList, applicationInstance *ApplicationInstance,
-) error {
-	applicationInstances.UpsertApplicationInstance(applicationInstance)
-	c.publishInterests(ctx, applicationInstances)
-
-	if err := c.shared.sync(); err != nil {
-		c.logFailedRescan(applicationInstance, err)
-		return err
-	}
-
-	if err := applicationInstance.ReplaceMonitoredResourcesFromCluster(ctx, c.ClusterId, c.shared); err != nil {
-		c.logFailedRescan(applicationInstance, err)
-		return err
-	}
-
-	c.publishInterests(ctx, applicationInstances)
-	return nil
-}
-
-func (c *Cluster) logFailedRescan(applicationInstance *ApplicationInstance, err error) {
-	c.logger.Error(
-		"Failed to get monitored resources",
-		slog.Any("error", err),
-		slog.String("applicationInstanceId", string(applicationInstance.ApplicationInstanceId)),
-	)
-}
-
-func (c *Cluster) resolveNamespaces(
-	ctx context.Context, desiredResources map[kube.ResourceKey]*DesiredResource,
-) map[kube.ResourceKey]*DesiredResource {
-	namespacedMap, _ := c.shared.namespaceMapWithHealth(ctx)
-
-	resolved := make(map[kube.ResourceKey]*DesiredResource, len(desiredResources))
-	for _, desiredResource := range desiredResources {
-		desiredResource.ResolveNamespace(namespacedMap)
-		// Try one more time to resolve the namespace after an invalidation
-		// TODO: We should not do this in the refactor, and instead only do this occasionally
-		if !desiredResource.IsNamespaceResolved {
-			c.shared.invalidateDiscovery()
-			namespacedMap, _ = c.shared.namespaceMapWithHealth(ctx)
-			desiredResource.ResolveNamespace(namespacedMap)
-		}
-		resolved[desiredResource.ResourceKey()] = desiredResource
-	}
-
-	return resolved
-}
-
-func (c *Cluster) publishInterests(ctx context.Context, applicationInstances *ApplicationInstanceList) {
-	if err := c.shared.interests.set(ctx, c.ClusterId, applicationInstances.resourceKeysOfInterest()); err != nil {
-		c.logger.Warn("Failed to publish the resources this cluster monitors", slog.Any("error", err))
-	}
-}
-
-// applyResourceChange runs on the target's goroutine, outside the cache's lock, so it's free to fetch
-// manifests from the API server.
-func (c *Cluster) applyResourceChange(
-	ctx context.Context, applicationInstances *ApplicationInstanceList, change resourceChange,
-) {
-	ctx, span := tracer.Start(ctx, "Cluster.applyResourceChange")
-	defer span.End()
-
-	span.SetAttributes(attribute.String("clusterId", string(c.ClusterId)))
-	span.SetAttributes(resourceTraceAttributes(change.newRes)...)
-
-	updates, err := applicationInstances.GetChangesForUpdatedResource(
-		ctx,
-		c.ClusterId,
-		c.shared,
-		change.newRes,
-		change.oldRes,
-	)
-	if err != nil {
-		c.logger.Error(err.Error())
-	}
-
-	if len(updates) > 0 {
-		c.publishInterests(ctx, applicationInstances)
-	}
-
-	for _, applicationInstanceUpdate := range updates {
-		c.logApplicationInstanceChanges(
-			"Sending resource updates due to updated monitored resource",
-			applicationInstanceUpdate,
-		)
-
-		c.updater.Update(ctx, applicationInstanceUpdate)
-	}
-}
-
-func (c *Cluster) setDesiredResourceAttributes(
-	span trace.Span, applicationInstanceId ApplicationInstanceId,
-	desiredResources map[kube.ResourceKey]*DesiredResource,
-) {
-	span.SetAttributes(attribute.String("applicationInstanceId", string(applicationInstanceId)))
-	span.SetAttributes(attribute.Int("desiredResourceCount", len(desiredResources)))
-	span.SetAttributes(attribute.String("clusterId", string(c.ClusterId)))
 }
 
 // GetRootParentResource recursively searches for the top level ownerId for the child resource provided.

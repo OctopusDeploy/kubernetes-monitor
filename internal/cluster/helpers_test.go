@@ -36,11 +36,11 @@ func newTestCluster(
 
 func seedApplicationInstances(t *testing.T, c *Cluster, applicationInstances ...*ApplicationInstance) {
 	t.Helper()
-	err := do(t.Context(), c.mailbox, func(list *ApplicationInstanceList) {
+	err := do(t.Context(), c.mailbox, func(state *clusterState) {
 		for _, applicationInstance := range applicationInstances {
-			list.UpsertApplicationInstance(applicationInstance)
+			state.upsertApplicationInstance(applicationInstance)
 		}
-		c.publishInterests(t.Context(), list)
+		state.publishInterests(t.Context())
 	})
 	if err != nil {
 		t.Fatalf("seeding application instances: %v", err)
@@ -55,8 +55,8 @@ func storedApplicationInstance(t *testing.T, c *Cluster, id ApplicationInstanceI
 		applicationInstance *ApplicationInstance
 		ok                  bool
 	}
-	result, err := ask(t.Context(), c.mailbox, func(list *ApplicationInstanceList) stored {
-		applicationInstance, ok := list.Get(id)
+	result, err := ask(t.Context(), c.mailbox, func(state *clusterState) stored {
+		applicationInstance, ok := state.getApplicationInstance(id)
 		return stored{applicationInstance, ok}
 	})
 	if err != nil {

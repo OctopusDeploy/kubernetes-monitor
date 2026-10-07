@@ -38,10 +38,14 @@ func newChangeQueue(ctx context.Context) *changeQueue {
 }
 
 func (q *changeQueue) run(ctx context.Context) {
+	// order and queued together are an insertion-ordered map: order holds each queued resource's key once, in
+	// the order it was first changed, and queued holds its folded change.
 	var order []kube.ResourceKey
 	queued := map[kube.ResourceKey]resourceChange{}
 
 	for {
+		// Sending on a nil channel blocks forever, so select never picks that case. out stays nil while the
+		// queue is empty, which disables the send below and leaves the loop waiting for a change or cancellation.
 		var out chan<- resourceChange
 		var next resourceChange
 		if len(order) > 0 {

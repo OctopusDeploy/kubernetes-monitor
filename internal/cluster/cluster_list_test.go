@@ -58,8 +58,8 @@ func TestEnsureCluster_CreatesCluster(t *testing.T) {
 		t.Error(diff)
 	}
 
-	applicationInstanceCount, err := ask(t.Context(), cluster.mailbox, func(list *ApplicationInstanceList) int {
-		return len(list.applicationInstances)
+	applicationInstanceCount, err := ask(t.Context(), cluster.mailbox, func(state *clusterState) int {
+		return len(state.applicationInstances)
 	})
 	if err != nil {
 		t.Fatalf("reading application instances: %s", err.Error())

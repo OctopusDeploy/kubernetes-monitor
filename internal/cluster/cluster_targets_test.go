@@ -60,7 +60,7 @@ func assertNoChanges(t *testing.T, changes chan *ApplicationInstanceChanges) {
 
 func waitForIdle(t *testing.T, c *Cluster) {
 	t.Helper()
-	require.NoError(t, do(t.Context(), c.mailbox, func(*ApplicationInstanceList) {}))
+	require.NoError(t, do(t.Context(), c.mailbox, func(*clusterState) {}))
 }
 
 // newTargetsTestConnection is a cluster with no live objects, so a rescan reports every desired resource as
@@ -162,8 +162,8 @@ func TestTarget_OrdersResourceChangesAgainstDesiredState(t *testing.T) {
 
 	applyInOrder := func(t *testing.T, c *Cluster, change resourceChange) {
 		t.Helper()
-		require.NoError(t, do(t.Context(), c.mailbox, func(list *ApplicationInstanceList) {
-			c.applyResourceChange(t.Context(), list, change)
+		require.NoError(t, do(t.Context(), c.mailbox, func(state *clusterState) {
+			c.sendResourceChangeUpdates(t.Context(), state.applyResourceChange(t.Context(), change))
 		}))
 	}
 

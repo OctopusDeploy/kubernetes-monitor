@@ -13,14 +13,16 @@ func SortDesiredResources(a, b *DesiredResource) bool {
 }
 
 func TestUpdateApplicationInstance_SavesNewDesiredResources(t *testing.T) {
-	applicationInstances := NewApplicationInstanceList()
+	applicationInstances := newClusterState(testClusterId, discardLogger(), nil)
 
 	expectedApplicationInstance := NewApplicationInstanceBuilder().Build()
 	expected := expectedApplicationInstance.GetDesiredResources()
 
-	applicationInstances.UpsertApplicationInstance(&expectedApplicationInstance)
+	applicationInstances.upsertApplicationInstance(&expectedApplicationInstance)
 
-	actualApplicationInstance, ok := applicationInstances.Get(expectedApplicationInstance.ApplicationInstanceId)
+	actualApplicationInstance, ok := applicationInstances.getApplicationInstance(
+		expectedApplicationInstance.ApplicationInstanceId,
+	)
 	actual := actualApplicationInstance.GetDesiredResources()
 
 	if diff := cmp.Diff(expected, actual, cmpopts.SortSlices(SortDesiredResources)); !ok || diff != "" {
@@ -29,12 +31,12 @@ func TestUpdateApplicationInstance_SavesNewDesiredResources(t *testing.T) {
 }
 
 func TestUpdateApplicationInstance_SavesDesiredResourcesForMultipleApplicationInstances(t *testing.T) {
-	applicationInstances := NewApplicationInstanceList()
+	applicationInstances := newClusterState(testClusterId, discardLogger(), nil)
 
 	existingResource := NewDesiredResourceBuilder().Build()
 	existingApplicationInstance := NewApplicationInstanceBuilder().Build()
 
-	applicationInstances.UpsertApplicationInstance(&existingApplicationInstance)
+	applicationInstances.upsertApplicationInstance(&existingApplicationInstance)
 
 	newResource := NewDesiredResourceBuilder().
 		WithName("updated").
@@ -48,9 +50,11 @@ func TestUpdateApplicationInstance_SavesDesiredResourcesForMultipleApplicationIn
 
 	expected := expectedApplicationInstance.GetDesiredResources()
 
-	applicationInstances.UpsertApplicationInstance(&expectedApplicationInstance)
+	applicationInstances.upsertApplicationInstance(&expectedApplicationInstance)
 
-	actualApplicationInstance, ok := applicationInstances.Get(expectedApplicationInstance.ApplicationInstanceId)
+	actualApplicationInstance, ok := applicationInstances.getApplicationInstance(
+		expectedApplicationInstance.ApplicationInstanceId,
+	)
 	actual := actualApplicationInstance.GetDesiredResources()
 
 	if diff := cmp.Diff(expected, actual, cmpopts.SortSlices(SortDesiredResources)); !ok || diff != "" {
@@ -59,12 +63,12 @@ func TestUpdateApplicationInstance_SavesDesiredResourcesForMultipleApplicationIn
 }
 
 func TestUpdateApplicationInstance_MergesWithExistingDesiredResources(t *testing.T) {
-	applicationInstances := NewApplicationInstanceList()
+	applicationInstances := newClusterState(testClusterId, discardLogger(), nil)
 
 	existingResource := NewDesiredResourceBuilder().Build()
 	existingApplicationInstance := NewApplicationInstanceBuilder().Build()
 
-	applicationInstances.UpsertApplicationInstance(&existingApplicationInstance)
+	applicationInstances.upsertApplicationInstance(&existingApplicationInstance)
 
 	newResource := NewDesiredResourceBuilder().
 		WithName("updated").
@@ -77,9 +81,11 @@ func TestUpdateApplicationInstance_MergesWithExistingDesiredResources(t *testing
 
 	expected := expectedApplicationInstance.GetDesiredResources()
 
-	applicationInstances.UpsertApplicationInstance(&expectedApplicationInstance)
+	applicationInstances.upsertApplicationInstance(&expectedApplicationInstance)
 
-	actualApplicationInstance, ok := applicationInstances.Get(expectedApplicationInstance.ApplicationInstanceId)
+	actualApplicationInstance, ok := applicationInstances.getApplicationInstance(
+		expectedApplicationInstance.ApplicationInstanceId,
+	)
 	actual := actualApplicationInstance.GetDesiredResources()
 
 	if diff := cmp.Diff(expected, actual, cmpopts.SortSlices(SortDesiredResources)); !ok || diff != "" {
@@ -88,7 +94,7 @@ func TestUpdateApplicationInstance_MergesWithExistingDesiredResources(t *testing
 }
 
 func TestUpdateApplicationInstance_ReplacesMatchingResourcesInExistingDesiredResources(t *testing.T) {
-	applicationInstances := NewApplicationInstanceList()
+	applicationInstances := newClusterState(testClusterId, discardLogger(), nil)
 
 	existingResource := NewDesiredResourceBuilder().Build()
 
@@ -98,15 +104,17 @@ func TestUpdateApplicationInstance_ReplacesMatchingResourcesInExistingDesiredRes
 
 	expected := expectedApplicationInstance.GetDesiredResources()
 
-	applicationInstances.UpsertApplicationInstance(&expectedApplicationInstance)
+	applicationInstances.upsertApplicationInstance(&expectedApplicationInstance)
 
 	newApplicationInstance := NewApplicationInstanceBuilder().
 		WithDesiredResources([]*DesiredResource{&existingResource, &existingResource}).
 		Build()
 
-	applicationInstances.UpsertApplicationInstance(&newApplicationInstance)
+	applicationInstances.upsertApplicationInstance(&newApplicationInstance)
 
-	actualApplicationInstance, ok := applicationInstances.Get(newApplicationInstance.ApplicationInstanceId)
+	actualApplicationInstance, ok := applicationInstances.getApplicationInstance(
+		newApplicationInstance.ApplicationInstanceId,
+	)
 	actual := actualApplicationInstance.GetDesiredResources()
 
 	if diff := cmp.Diff(expected, actual, cmpopts.SortSlices(SortDesiredResources)); !ok || diff != "" {
@@ -146,9 +154,9 @@ func TestResourceKeysOfInterest_CoversDesiredAndTrackedResourcesOfEveryApplicati
 		WithUnknownMonitoredResources([]*UnknownMonitoredResource{&secondUnknown}).
 		Build()
 
-	applicationInstances := NewApplicationInstanceList()
-	applicationInstances.UpsertApplicationInstance(&first)
-	applicationInstances.UpsertApplicationInstance(&second)
+	applicationInstances := newClusterState(testClusterId, discardLogger(), nil)
+	applicationInstances.upsertApplicationInstance(&first)
+	applicationInstances.upsertApplicationInstance(&second)
 
 	expected := map[kube.ResourceKey]struct{}{
 		firstDesired.ResourceKey():  {},

@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"iter"
 	"maps"
 	"slices"
 
@@ -417,13 +418,20 @@ func (a *ApplicationInstance) GetDesiredResources() []*DesiredResource {
 	return slices.Collect(maps.Values(a.desiredResources))
 }
 
-func (a *ApplicationInstance) addResourceKeysOfInterest(keys map[kube.ResourceKey]struct{}) {
-	for key, desiredResource := range a.desiredResources {
-		keys[key] = struct{}{}
-		keys[desiredResource.ResourceKey()] = struct{}{}
-	}
-	for key := range a.trackedResourceKeys {
-		keys[key] = struct{}{}
+// resourceKeysOfInterest yields a desired resource under both the key it's stored by and its current key,
+// which can differ around namespace resolution, so it may yield the same key more than once.
+func (a *ApplicationInstance) resourceKeysOfInterest() iter.Seq[kube.ResourceKey] {
+	return func(yield func(kube.ResourceKey) bool) {
+		for key, desiredResource := range a.desiredResources {
+			if !yield(key) || !yield(desiredResource.ResourceKey()) {
+				return
+			}
+		}
+		for key := range a.trackedResourceKeys {
+			if !yield(key) {
+				return
+			}
+		}
 	}
 }
 

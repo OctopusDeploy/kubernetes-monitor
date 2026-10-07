@@ -92,10 +92,10 @@ func indexSizes(t *testing.T, interests *resourceInterests) (targets, resources 
 	type sizes struct{ targets, resources int }
 	result, err := ask(t.Context(), interests.mailbox, func(index *interestIndex) sizes {
 		total := 0
-		for _, targetKeys := range index.byTarget {
+		for _, targetKeys := range index.keysByTarget {
 			total += len(targetKeys)
 		}
-		return sizes{total, len(index.byResource)}
+		return sizes{total, len(index.targetsByResource)}
 	})
 	require.NoError(t, err)
 	return result.targets, result.resources

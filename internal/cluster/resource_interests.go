@@ -17,10 +17,10 @@ type resourceInterests struct {
 }
 
 type interestIndex struct {
-	byTarget    map[ClusterId]map[kube.ResourceKey]struct{}
-	byResource  map[kube.ResourceKey]map[ClusterId]struct{}
-	subscribers map[ClusterId]chan<- resourceChange
-	stopped     <-chan struct{}
+	keysByTarget      map[ClusterId]map[kube.ResourceKey]struct{}
+	targetsByResource map[kube.ResourceKey]map[ClusterId]struct{}
+	subscribers       map[ClusterId]chan<- resourceChange
+	stopped           <-chan struct{}
 }
 
 func newResourceInterests(ctx context.Context, logger *slog.Logger) *resourceInterests {
@@ -29,14 +29,17 @@ func newResourceInterests(ctx context.Context, logger *slog.Logger) *resourceInt
 		mailbox: newMailbox[interestIndex](ctx.Done()),
 	}
 	go r.mailbox.serve(&interestIndex{
-		byTarget:    map[ClusterId]map[kube.ResourceKey]struct{}{},
-		byResource:  map[kube.ResourceKey]map[ClusterId]struct{}{},
-		subscribers: map[ClusterId]chan<- resourceChange{},
-		stopped:     ctx.Done(),
+		keysByTarget:      map[ClusterId]map[kube.ResourceKey]struct{}{},
+		targetsByResource: map[kube.ResourceKey]map[ClusterId]struct{}{},
+		subscribers:       map[ClusterId]chan<- resourceChange{},
+		stopped:           ctx.Done(),
 	})
 	return r
 }
 
+// There's no unsubscribe because every target shares the index's lifetime (the ClusterList's), so a target
+// never stops reading while the index routes to it. Removing a target on its own would need one that drops
+// both its subscriber and its keys, and route would need to stop waiting on a target that has gone.
 func (r *resourceInterests) subscribe(ctx context.Context, target ClusterId, changes chan<- resourceChange) error {
 	return do(ctx, r.mailbox, func(index *interestIndex) {
 		index.subscribers[target] = changes
@@ -55,7 +58,11 @@ func (r *resourceInterests) set(ctx context.Context, target ClusterId, keys map[
 func (r *resourceInterests) populateResourceInfo(un *unstructured.Unstructured, isRoot bool) (any, bool) {
 	info := ResourceInfo{ResourceKey: kube.GetResourceKey(un), OwnerRefs: getOwnerReferences(un)}
 	cacheManifest, err := ask(context.Background(), r.mailbox, func(index *interestIndex) bool {
-		return index.cacheManifest(info, isRoot)
+		if index.isResourceInIndex(info.ResourceKey) {
+			return true
+		}
+		// Roots have no owners to inherit interest from.
+		return !isRoot && index.inheritInterestFromOwners(info)
 	})
 	if err != nil {
 		return info, false
@@ -75,61 +82,67 @@ func (r *resourceInterests) route(newRes, oldRes *cache.Resource, _ map[kube.Res
 }
 
 func (x *interestIndex) set(target ClusterId, keys map[kube.ResourceKey]struct{}) {
-	for key := range x.byTarget[target] {
+	for key := range x.keysByTarget[target] {
 		if _, kept := keys[key]; !kept {
-			x.forget(target, key)
+			x.removeTargetFromKey(key, target)
 		}
 	}
 	for key := range keys {
-		x.addTarget(key, target)
+		x.addTargetToKey(key, target)
 	}
-	x.byTarget[target] = keys
+	x.keysByTarget[target] = keys
 }
 
 func (x *interestIndex) remember(target ClusterId, key kube.ResourceKey) {
-	keys, ok := x.byTarget[target]
-	if !ok {
-		keys = map[kube.ResourceKey]struct{}{}
-		x.byTarget[target] = keys
-	}
-	keys[key] = struct{}{}
-	x.addTarget(key, target)
+	x.addKeyToTarget(key, target)
+	x.addTargetToKey(key, target)
 }
 
-func (x *interestIndex) addTarget(key kube.ResourceKey, target ClusterId) {
-	targets, ok := x.byResource[key]
+func (x *interestIndex) addKeyToTarget(key kube.ResourceKey, target ClusterId) {
+	keys, ok := x.keysByTarget[target]
+	if !ok {
+		keys = map[kube.ResourceKey]struct{}{}
+		x.keysByTarget[target] = keys
+	}
+	keys[key] = struct{}{}
+}
+
+func (x *interestIndex) addTargetToKey(key kube.ResourceKey, target ClusterId) {
+	targets, ok := x.targetsByResource[key]
 	if !ok {
 		targets = map[ClusterId]struct{}{}
-		x.byResource[key] = targets
+		x.targetsByResource[key] = targets
 	}
 	targets[target] = struct{}{}
 }
 
-func (x *interestIndex) forget(target ClusterId, key kube.ResourceKey) {
-	targets := x.byResource[key]
+func (x *interestIndex) removeTargetFromKey(key kube.ResourceKey, target ClusterId) {
+	targets := x.targetsByResource[key]
 	delete(targets, target)
 	if len(targets) == 0 {
-		delete(x.byResource, key)
+		delete(x.targetsByResource, key)
 	}
 }
 
-// cacheManifest makes a target interested in resources owned by something it's interested in, because it
-// will monitor them as children; that lets their own children be recognised while the cache lists the cluster.
-func (x *interestIndex) cacheManifest(info ResourceInfo, isRoot bool) bool {
-	if len(x.byResource[info.ResourceKey]) > 0 {
-		return true
-	}
-	if isRoot {
-		return false
-	}
+func (x *interestIndex) isResourceInIndex(key kube.ResourceKey) bool {
+	return len(x.targetsByResource[key]) > 0
+}
 
+// inheritInterestFromOwners makes a target interested in a resource owned by something it's interested in,
+// because it will monitor the resource as a child; that lets the resource's own children be recognised while
+// the cache lists the cluster. It reports whether any target inherited the resource.
+//
+// Only direct owners are checked, so a resource populated before its owner was inherited (a grandchild
+// listed before its parent) is missed here. It's picked up when the cache next populates it, on its next
+// watch event or relist, or when the target's periodic sweep rescans and republishes its children.
+func (x *interestIndex) inheritInterestFromOwners(info ResourceInfo) bool {
 	inherited := false
 	for _, ownerRef := range info.OwnerRefs {
 		ownerKey, err := ownerRefResourceKey(ownerRef, info.ResourceKey.Namespace)
 		if err != nil {
 			continue
 		}
-		for target := range x.byResource[ownerKey] {
+		for target := range x.targetsByResource[ownerKey] {
 			x.remember(target, info.ResourceKey)
 			inherited = true
 		}
@@ -144,7 +157,7 @@ func (x *interestIndex) route(change resourceChange) {
 		if !ok {
 			continue
 		}
-		for target := range x.byResource[info.ResourceKey] {
+		for target := range x.targetsByResource[info.ResourceKey] {
 			recipients[target] = struct{}{}
 		}
 		for _, ownerRef := range info.OwnerRefs {
@@ -152,7 +165,7 @@ func (x *interestIndex) route(change resourceChange) {
 			if err != nil {
 				continue
 			}
-			for target := range x.byResource[ownerKey] {
+			for target := range x.targetsByResource[ownerKey] {
 				recipients[target] = struct{}{}
 			}
 		}

@@ -79,14 +79,14 @@ func TestGetMonitoredResources_AfterOutOfOrderPopulate_DoesNotCrash(t *testing.T
 		WithManifest(deployment).
 		Build()
 
-	appList := NewApplicationInstanceList()
+	state := newClusterState(testClusterId, discardLogger(), nil)
 	appInstance := NewApplicationInstanceBuilder().
 		WithDesiredResources([]*DesiredResource{&desired}).
 		Build()
-	appList.UpsertApplicationInstance(&appInstance)
+	state.upsertApplicationInstance(&appInstance)
 
 	interests := newResourceInterests(t.Context(), discardLogger())
-	if err := interests.set(t.Context(), testClusterId, appList.resourceKeysOfInterest()); err != nil {
+	if err := interests.set(t.Context(), testClusterId, state.resourceKeysOfInterest()); err != nil {
 		t.Fatalf("set interests: %v", err)
 	}
 
