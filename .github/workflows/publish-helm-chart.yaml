@@ -129,13 +129,13 @@ jobs:
           name: "${{ needs.version_and_package.outputs.PACKAGE_NAME }}"
 
       - name: Login to Octopus
-        uses: OctopusDeploy/login@d156cc2dd8d6f4592c3a0e54e8b51a4ea9198dd5 # v2.0.1
+        uses: OctopusDeploy/login@5e2331a069ebc144b20ded22766dfce025dd9e73 # v2.0.2
         with:
           server: ${{ vars.OCTOPUS_SERVER }}
           service_account_id: ${{ secrets.OCTOPUS_SERVICE_ACCOUNT }}
 
       - name: Push helm chart to Octopus Deploy 🐙
-        uses: OctopusDeploy/push-package-action@e2b339863f2aba04d1aead9675136af1bd2bceaa # v4.0.5
+        uses: OctopusDeploy/push-package-action@88c472a064af6485c4d0cc07d587213895a74a2e # v4.0.6
         with:
           space: "${{ vars.DEPLOY_K8S_OWNERS_SPACE_NAME }}"
           packages: ${{ needs.version_and_package.outputs.PACKAGE_NAME }}
