@@ -6,8 +6,8 @@ require (
 	dario.cat/mergo v1.0.2
 	github.com/OctopusDeploy/go-octopusdeploy/v2 v2.118.0
 	github.com/OctopusDeploy/octopus-grpc/go v0.5.1
-	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.0-rc1
-	github.com/argoproj/argo-cd/v3 v3.6.0-rc1
+	github.com/argoproj/argo-cd/gitops-engine/v3 v3.6.0-rc2
+	github.com/argoproj/argo-cd/v3 v3.6.0-rc2
 	github.com/dave/jennifer v1.7.1
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.1-0.20241114170450-2d3c2a9cc518
@@ -30,7 +30,7 @@ require (
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.28.0
 	go.uber.org/zap/exp v0.3.0
-	google.golang.org/grpc v1.83.2
+	google.golang.org/grpc v1.84.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.2
 	google.golang.org/protobuf v1.36.12
 	k8s.io/api v0.37.0
@@ -186,7 +186,7 @@ require (
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
-	google.golang.org/genproto v0.0.0-20260128011058-8636f8732409 // indirect
+	google.golang.org/genproto v0.0.0-20260319201613-d00831a3d3e7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
