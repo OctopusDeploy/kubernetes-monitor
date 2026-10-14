@@ -1,9 +1,6 @@
 package cluster
 
 import (
-	"context"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -49,11 +46,10 @@ func newStubAPIServer(t *testing.T) *rest.Config {
 
 func TestEnsureCluster_CreatesCluster(t *testing.T) {
 	restConfig := newStubAPIServer(t)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	clusterList := NewClusterList(t.Context(), restConfig, logger, NoOpUpdater{}, nil, false)
+	clusterList := NewClusterList(t.Context(), restConfig, discardLogger(), NoOpUpdater{}, nil, false)
 	clusterId := ClusterId("cluster-id")
 
-	cluster, err := clusterList.EnsureCluster(context.TODO(), clusterId)
+	cluster, err := clusterList.EnsureCluster(t.Context(), clusterId)
 	if err != nil {
 		t.Errorf("Failed to ensure cluster: %s", err.Error())
 	}
@@ -62,32 +58,28 @@ func TestEnsureCluster_CreatesCluster(t *testing.T) {
 		t.Error(diff)
 	}
 
-	emptyApplicationInstanceList := NewApplicationInstanceList()
-
-	if diff := cmp.Diff(
-		emptyApplicationInstanceList.applicationInstances.GetAsMap(),
-		cluster.ApplicationInstances.applicationInstances.GetAsMap(),
-	); diff != "" {
-		t.Error(diff)
+	applicationInstanceCount, err := ask(t.Context(), cluster.mailbox, func(state *clusterState) int {
+		return len(state.applicationInstances)
+	})
+	if err != nil {
+		t.Fatalf("reading application instances: %s", err.Error())
 	}
-
-	if cluster.onResourceUpdatedUnsubscribe == nil {
-		t.Error("OnResourceUpdatedUnsubscribe should not be nil")
+	if applicationInstanceCount != 0 {
+		t.Errorf("Found %d application instances, expected none", applicationInstanceCount)
 	}
 }
 
 func TestEnsureCluster_ReturnsExistingCluster(t *testing.T) {
 	restConfig := newStubAPIServer(t)
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	clusterList := NewClusterList(t.Context(), restConfig, logger, NoOpUpdater{}, nil, false)
+	clusterList := NewClusterList(t.Context(), restConfig, discardLogger(), NoOpUpdater{}, nil, false)
 	clusterId := ClusterId("cluster-id")
 
-	_, err := clusterList.EnsureCluster(context.TODO(), clusterId)
+	existing, err := clusterList.EnsureCluster(t.Context(), clusterId)
 	if err != nil {
 		t.Fatalf("Failed to ensure cluster during test setup: %s", err.Error())
 	}
 
-	actual, err := clusterList.EnsureCluster(context.TODO(), clusterId)
+	actual, err := clusterList.EnsureCluster(t.Context(), clusterId)
 	if err != nil {
 		t.Errorf("Failed to ensure cluster: %s", err.Error())
 	}
@@ -96,7 +88,28 @@ func TestEnsureCluster_ReturnsExistingCluster(t *testing.T) {
 		t.Error(diff)
 	}
 
-	if len(clusterList.clusters) != 1 {
-		t.Errorf("Found %d clusters, expected 1", len(clusterList.clusters))
+	if actual != existing {
+		t.Error("expected the existing cluster to be returned")
+	}
+}
+
+func TestEnsureCluster_DifferentIdsShareOneClusterConnection(t *testing.T) {
+	restConfig := newStubAPIServer(t)
+	clusterList := NewClusterList(t.Context(), restConfig, discardLogger(), NoOpUpdater{}, nil, false)
+
+	first, err := clusterList.EnsureCluster(t.Context(), "first")
+	if err != nil {
+		t.Fatalf("Failed to ensure first cluster: %s", err.Error())
+	}
+	second, err := clusterList.EnsureCluster(t.Context(), "second")
+	if err != nil {
+		t.Fatalf("Failed to ensure second cluster: %s", err.Error())
+	}
+
+	if first == second {
+		t.Error("expected a distinct target per cluster id")
+	}
+	if first.shared != second.shared {
+		t.Error("expected every target to share one cluster cache")
 	}
 }

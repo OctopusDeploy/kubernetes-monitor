@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/kube"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
@@ -37,26 +36,20 @@ func TestLoadsMonitoredResources(t *testing.T) {
 				}
 			}
 
-			applicationInstance := cluster.NewApplicationInstanceBuilder().
-				WithDesiredResources(desiredDeployments).
-				Build()
-
 			testCluster := createTestCluster(t, cfg)
-			testCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
+			if err := testCluster.ReplaceDesiredResources(
+				ctx, testApplicationInstanceId, desiredResourceMap(desiredDeployments...), testHashSalt,
+			); err != nil {
+				t.Fatal(err)
+			}
 
 			return context.WithValue(ctx, testContextKey("testCluster"), testCluster)
 		}).
 		Assess("loads present and children resources", func(
 			ctx context.Context, t *testing.T, cfg *envconf.Config,
 		) context.Context {
-			testCluster := ctx.Value(testContextKey("testCluster")).(*cluster.Cluster)
-
-			_ = testCluster.Sync()
-
-			var applicationInstanceUpdates []cluster.ApplicationInstanceChanges
-			for applicationInstanceUpdate := range testCluster.GetApplicationInstanceUpdates(context.TODO()) {
-				applicationInstanceUpdates = append(applicationInstanceUpdates, *applicationInstanceUpdate)
-			}
+			testCluster := ctx.Value(testContextKey("testCluster")).(*testTarget)
+			applicationInstanceUpdates := testCluster.sweep(ctx)
 
 			if len(applicationInstanceUpdates) != 1 {
 				t.Fatalf("Expected 1 ApplicationInstanceUpdate, found %d", len(applicationInstanceUpdates))
@@ -96,31 +89,16 @@ func TestLoadsMonitoredResources(t *testing.T) {
 			return ctx
 		}).
 		Assess("loads missing resources", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
-			testCluster := ctx.Value(testContextKey("testCluster")).(*cluster.Cluster)
+			testCluster := ctx.Value(testContextKey("testCluster")).(*testTarget)
 
 			missingDesiredResource := cluster.NewDesiredResourceBuilder().Build()
-
-			testCluster.ApplicationInstances.Iterate(func(
-				applicationInstanceId cluster.ApplicationInstanceId,
-				updatedApplicationInstance *cluster.ApplicationInstance,
-			) bool {
-				updatedApplicationInstance.MergeDesiredResources(
-					context.TODO(),
-					testCluster.ClusterId,
-					map[kube.ResourceKey]*cluster.DesiredResource{
-						missingDesiredResource.ResourceKey(): &missingDesiredResource,
-					},
-				)
-				testCluster.ApplicationInstances.UpsertApplicationInstance(updatedApplicationInstance)
-				return true
-			})
-
-			testCluster.RequestCacheRefresh()
-
-			var applicationInstanceUpdates []cluster.ApplicationInstanceChanges
-			for applicationInstanceUpdate := range testCluster.GetApplicationInstanceUpdates(context.TODO()) {
-				applicationInstanceUpdates = append(applicationInstanceUpdates, *applicationInstanceUpdate)
+			if err := testCluster.MergeDesiredResources(
+				ctx, testApplicationInstanceId, desiredResourceMap(&missingDesiredResource), testHashSalt,
+			); err != nil {
+				t.Fatal(err)
 			}
+
+			applicationInstanceUpdates := testCluster.sweep(ctx)
 
 			if len(applicationInstanceUpdates) != 1 {
 				t.Fatalf("Expected 1 ApplicationInstanceUpdate, found %d", len(applicationInstanceUpdates))
@@ -171,15 +149,13 @@ func TestLoadsMonitoredResources(t *testing.T) {
 				unmonitoredNamespace,
 			)
 
-			applicationInstance := cluster.NewApplicationInstanceBuilder().
-				WithDesiredResources([]*cluster.DesiredResource{&unknownDesiredResource}).
-				Build()
-			scopedCluster.ApplicationInstances.UpsertApplicationInstance(&applicationInstance)
-
-			var applicationInstanceUpdates []cluster.ApplicationInstanceChanges
-			for applicationInstanceUpdate := range scopedCluster.GetApplicationInstanceUpdates(context.TODO()) {
-				applicationInstanceUpdates = append(applicationInstanceUpdates, *applicationInstanceUpdate)
+			if err := scopedCluster.ReplaceDesiredResources(
+				ctx, testApplicationInstanceId, desiredResourceMap(&unknownDesiredResource), testHashSalt,
+			); err != nil {
+				t.Fatal(err)
 			}
+
+			applicationInstanceUpdates := scopedCluster.sweep(ctx)
 
 			if len(applicationInstanceUpdates) != 1 {
 				t.Fatalf("Expected 1 ApplicationInstanceUpdate, found %d", len(applicationInstanceUpdates))
@@ -253,7 +229,7 @@ func TestLoadsMonitoredResources(t *testing.T) {
 }
 
 func createComparableResourcesForApplicationInstanceUpdate(
-	update cluster.ApplicationInstanceChanges,
+	update *cluster.ApplicationInstanceChanges,
 ) []ComparableResource {
 	actualResources := []ComparableResource{}
 	for _, resource := range update.PresentMonitoredResources {
@@ -275,7 +251,7 @@ func createComparableResourcesForMissingResources(
 	return actualResources
 }
 
-func getPresentAndChildResourceCount(update cluster.ApplicationInstanceChanges) int {
+func getPresentAndChildResourceCount(update *cluster.ApplicationInstanceChanges) int {
 	return len(update.PresentMonitoredResources) +
 		len(update.ChildMonitoredResources)
 }

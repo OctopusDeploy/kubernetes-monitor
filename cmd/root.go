@@ -30,10 +30,12 @@ report on resources that exist in the cluster.
 		// Handle SIGINT (CTRL+C) gracefully.
 		ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt)
 
-		debug, _ := cmd.Flags().GetBool("debug")
+		cfg, err := config.GetConfig(cmd.Flags(), "")
+		// Read debug mode from the resolved config rather than the flag, so the DEBUG environment variable
+		// enables it without adding arguments to the container's command.
+		debug := cfg != nil && cfg.DebugEnabled
 		logger := logger.New(debug)
 		slog.SetDefault(logger)
-		cfg, err := config.GetConfig(cmd.Flags(), "")
 		// We can fail to read the config if the user has not provided a config file
 		// We shouldn't return an error in this case, but we should for any others
 		if err != nil {
@@ -61,11 +63,9 @@ report on resources that exist in the cluster.
 			}
 		}
 
-		tracingEnabled, _ := cmd.Flags().GetBool("tracing")
-		printTraces, _ := cmd.Flags().GetBool("print-traces")
 		otelConfig := run.OtelConfig{
-			TracingEnabled: tracingEnabled,
-			PrintTraces:    printTraces,
+			TracingEnabled: cfg != nil && cfg.TracingEnabled,
+			PrintTraces:    cfg != nil && cfg.PrintTraces,
 		}
 
 		err = run.Run(ctx, cfg, logger, otelConfig)

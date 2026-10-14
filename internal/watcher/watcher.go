@@ -31,7 +31,7 @@ type Watcher struct {
 	ErrorCh                *chan error
 	Logger                 *slog.Logger
 	Connection             connection.Connection
-	Clusters               cluster.ClusterList
+	Clusters               *cluster.ClusterList
 
 	// subscribers tracks the goroutines started for one run, so a health-driven
 	// stop can wait for them before the next run starts them again.
@@ -271,7 +271,7 @@ func (w *Watcher) report(ctx context.Context, err error) {
 func (w *Watcher) SubscribeToConfigurationUpdates(parentCtx context.Context) error {
 	ctx := context.WithValue(parentCtx, ContextKey("component"), "CommandHandler")
 	logger := w.Logger.With(slog.String("component", "CommandHandler"))
-	cs := commands.NewCommandHandler(&w.Clusters, w.Connection.Get(), ctx, logger)
+	cs := commands.NewCommandHandler(w.Clusters, w.Connection.Get(), ctx, logger)
 
 	w.forwardErrors(ctx, cs.ErrCh)
 
@@ -288,7 +288,7 @@ func (w *Watcher) SubscribeToLogRequests(parentCtx context.Context) error {
 	ctx := context.WithValue(parentCtx, ContextKey("component"), "LogsHandler")
 	logger := w.Logger.With(slog.String("component", "LogsHandler"))
 
-	logHandler := logs.NewHandler(&w.Clusters, logger, ctx, w.Connection.Get())
+	logHandler := logs.NewHandler(w.Clusters, logger, ctx, w.Connection.Get())
 
 	w.forwardErrors(ctx, logHandler.ErrCh)
 
@@ -305,7 +305,7 @@ func (w *Watcher) SubscribeToEventRequests(parentCtx context.Context) error {
 	ctx := context.WithValue(parentCtx, ContextKey("component"), "EventsHandler")
 	logger := w.Logger.With(slog.String("component", "EventsHandler"))
 
-	eventHandler := events.NewHandler(&w.Clusters, logger, ctx, w.Connection.Get())
+	eventHandler := events.NewHandler(w.Clusters, logger, ctx, w.Connection.Get())
 
 	w.forwardErrors(ctx, eventHandler.ErrCh)
 

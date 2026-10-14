@@ -1,11 +1,10 @@
 package cluster
 
 import (
-	"io"
-	"log/slog"
 	"sync"
 	"testing"
 
+	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache"
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache/mocks"
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/kube"
 	"github.com/stretchr/testify/assert"
@@ -71,14 +70,11 @@ func TestGetMonitoredResources_FiltersTargetObjectsViaResourceFilter(t *testing.
 		mock.AnythingOfType("func(*cache.Resource, map[kube.ResourceKey]*cache.Resource) bool"),
 	).Return()
 
-	c := &Cluster{
-		ClusterId:            "cluster-id",
-		logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
-		clusterCache:         &mockCache,
-		resourceFilter:       spy,
-		clusterServer:        "test-server",
-		ApplicationInstances: NewApplicationInstanceList(),
-	}
+	mockCache.On("GetClusterInfo").Return(cache.ClusterInfo{Server: "test-server"})
+	shared := newTestSharedCluster(t, ClusterConnection{
+		Cache:          &mockCache,
+		ResourceFilter: spy,
+	})
 
 	keptPod := NewDesiredResourceBuilder().
 		WithId("kept-pod-id").
@@ -117,7 +113,7 @@ func TestGetMonitoredResources_FiltersTargetObjectsViaResourceFilter(t *testing.
 		droppedDeployment.ResourceKey(): &droppedDeployment,
 	}
 
-	_, _, _, _, err := c.getMonitoredResources(desiredResources, crypto.HashSalt("salt"), true)
+	_, _, _, _, err := shared.getMonitoredResources(testClusterId, desiredResources, crypto.HashSalt("salt"), true)
 	if !assert.NoError(t, err) {
 		return
 	}

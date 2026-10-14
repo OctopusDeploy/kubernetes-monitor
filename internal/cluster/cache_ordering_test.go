@@ -2,8 +2,6 @@ package cluster
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -37,7 +35,7 @@ func (m *MockCachedDiscoveryClient) Invalidate() {}
 
 // TestGetMonitoredResources_AfterOutOfOrderPopulate_DoesNotCrash populates the
 // real cluster cache with watch events in child-before-parents order, then
-// calls getMonitoredResources. Crashes if onPopulateResourceInfoHandler is
+// calls getMonitoredResources. Crashes if populateResourceInfo is
 // reverted to the pre-#125 conditional return, unless the sanitising call
 // sites tolerate a nil manifest.
 func TestGetMonitoredResources_AfterOutOfOrderPopulate_DoesNotCrash(t *testing.T) {
@@ -81,13 +79,18 @@ func TestGetMonitoredResources_AfterOutOfOrderPopulate_DoesNotCrash(t *testing.T
 		WithManifest(deployment).
 		Build()
 
-	appList := NewApplicationInstanceList()
+	state := newClusterState(testClusterId, discardLogger(), nil)
 	appInstance := NewApplicationInstanceBuilder().
 		WithDesiredResources([]*DesiredResource{&desired}).
 		Build()
-	appList.UpsertApplicationInstance(&appInstance)
+	state.upsertApplicationInstance(&appInstance)
 
-	cc, dyn, disc := newFakeClusterCacheForOrderingTest(t, appList)
+	interests := newResourceInterests(t.Context(), discardLogger())
+	if err := interests.set(t.Context(), testClusterId, state.resourceKeysOfInterest()); err != nil {
+		t.Fatalf("set interests: %v", err)
+	}
+
+	cc, dyn, disc := newFakeClusterCacheForOrderingTest(t, interests)
 	defer cc.Invalidate()
 
 	events := make(chan kube.ResourceKey, 16)
@@ -111,20 +114,18 @@ func TestGetMonitoredResources_AfterOutOfOrderPopulate_DoesNotCrash(t *testing.T
 	createAndWait(t, dyn, namespace, replicaSet, rsGVR, kube.GetResourceKey(replicaSet), events)
 	createAndWait(t, dyn, namespace, deployment, deploymentGVR, kube.GetResourceKey(deployment), events)
 
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	testCluster := &Cluster{
-		ClusterId:             ClusterId("test"),
-		ApplicationInstances:  appList,
-		mutex:                 NewMutexWithLogging(logger, "Cluster"),
-		logger:                logger,
-		clusterCache:          cc,
-		dynamicClient:         dyn,
-		cachedDiscoveryClient: disc,
-		// getMonitoredResources no longer syncs — callers do — so the watch-driven state survives into the assertion
-	}
+	shared := ClusterConnection{
+		Cache:         cc,
+		DynamicClient: dyn,
+		Discovery:     disc,
+	}.sharedCluster(
+		discardLogger(),
+		interests,
+	)
+	// getMonitoredResources doesn't sync — callers do — so the watch-driven state survives into the assertion
 
 	desiredMap := map[kube.ResourceKey]*DesiredResource{desired.ResourceKey(): &desired}
-	if _, _, _, _, err := testCluster.getMonitoredResources(desiredMap, "salt", true); err != nil {
+	if _, _, _, _, err := shared.getMonitoredResources(testClusterId, desiredMap, "salt", true); err != nil {
 		t.Fatalf("getMonitoredResources: %v", err)
 	}
 }
@@ -137,7 +138,7 @@ var (
 
 func newFakeClusterCacheForOrderingTest(
 	t *testing.T,
-	appList *ApplicationInstanceList,
+	interests *resourceInterests,
 ) (cache.ClusterCache, dynamic.Interface, discovery.CachedDiscoveryInterface) {
 	t.Helper()
 
@@ -191,7 +192,7 @@ func newFakeClusterCacheForOrderingTest(
 	cc := cache.NewClusterCache(
 		&rest.Config{Host: "https://test"},
 		cache.SetKubectl(mock),
-		cache.SetPopulateResourceInfoHandler(onPopulateResourceInfoHandler(appList)),
+		cache.SetPopulateResourceInfoHandler(interests.populateResourceInfo),
 	)
 	return cc, client, &discoveryClient
 }

@@ -22,10 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/kube"
 	"github.com/grafana/pyroscope-go"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/discovery/cached/memory"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
@@ -72,6 +71,21 @@ func TestCacheMemoryProfile_10PercentDesired(t *testing.T) {
 		deployments:       3000,
 		replicas:          15,
 		desiredPct:        0.10,
+		createConcurrency: 64,
+		qps:               1000,
+		burst:             2000,
+		holdSeconds:       30,
+	})
+}
+
+// The customer case: one cluster of about 17,000 resources monitored by 500 Octopus machines, each deploying
+// two of its deployments.
+func TestCacheMemoryProfile_500Targets(t *testing.T) {
+	runMemoryProfileFeature(t, memTestConfig{
+		deployments:       1000,
+		replicas:          15,
+		desiredPct:        1,
+		targets:           500,
 		createConcurrency: 64,
 		qps:               1000,
 		burst:             2000,
@@ -149,15 +163,16 @@ func profileCluster(
 		namespace = cfg.Namespace()
 	}
 	client := highQPSClient(t, cfg, opts)
-	testCluster := createTestClusterWithQPS(t, cfg, opts)
-	seedDesiredResources(ctx, t, client, namespace, testCluster, namePrefix, opts)
+	desired := desiredDeployments(ctx, t, client, namespace, namePrefix, opts)
 	client = nil // Drop so the heap profile only reflects the cluster cache.
+	targets := max(opts.targets, 1)
 
 	tags := map[string]string{
 		"test":        t.Name(),
 		"deployments": strconv.Itoa(opts.deployments),
 		"replicas":    strconv.Itoa(int(opts.replicas)),
 		"desired_pct": strconv.FormatFloat(opts.desiredPct, 'f', -1, 64),
+		"targets":     strconv.Itoa(targets),
 		"phase":       "populated",
 	}
 
@@ -176,16 +191,30 @@ func profileCluster(
 		writeHeapDump(t, "baseline")
 	}
 
-	syncStart := time.Now()
-	if err := testCluster.Sync(); err != nil {
-		t.Fatalf("Sync: %v", err)
+	clusters := cluster.NewClusterList(
+		t.Context(),
+		withQPS(cfg.Client().RESTConfig(), opts),
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cluster.NoOpUpdater{},
+		nil,
+		false,
+	)
+	seedTargets(ctx, t, clusters, desired, targets)
+
+	sweepStart := time.Now()
+	swept := 0
+	for range clusters.ApplicationInstanceUpdates(ctx) {
+		swept++
 	}
-	t.Logf("cluster cache synced in %s", time.Since(syncStart))
+	t.Logf("swept %d application instances across %d targets in %s", swept, targets, time.Since(sweepStart))
+	if swept != targets {
+		t.Fatalf("expected one application instance per target, swept %d", swept)
+	}
 
 	forceGC()
 	reportRuntimeMemStats(t)
 	// Without KeepAlive the cache is eligible for GC before we sample it.
-	runtime.KeepAlive(testCluster)
+	runtime.KeepAlive(clusters)
 
 	if !pyroUp {
 		writeHeapDump(t, "populated")
@@ -195,14 +224,14 @@ func profileCluster(
 		holdWithPeriodicGC(time.Duration(opts.holdSeconds) * time.Second)
 	}
 
-	runtime.KeepAlive(testCluster)
+	runtime.KeepAlive(clusters)
 }
 
-// seedDesiredResources marks the first desiredPct of deployments as desired.
-func seedDesiredResources(
-	ctx context.Context, t *testing.T, client kubernetes.Interface, namespace string,
-	testCluster *cluster.Cluster, namePrefix string, opts memTestConfig,
-) {
+// desiredDeployments returns the first desiredPct of the deployments as desired resources.
+func desiredDeployments(
+	ctx context.Context, t *testing.T, client kubernetes.Interface, namespace, namePrefix string,
+	opts memTestConfig,
+) []*cluster.DesiredResource {
 	t.Helper()
 	desiredTarget := int(float64(opts.deployments) * opts.desiredPct)
 	if desiredTarget < 1 && opts.desiredPct > 0 {
@@ -210,24 +239,46 @@ func seedDesiredResources(
 	}
 
 	desired := make([]*cluster.DesiredResource, 0, desiredTarget)
-	for i := 0; i < desiredTarget; i++ {
+	for i := range desiredTarget {
 		name := fmt.Sprintf("%s-%d", namePrefix, i)
 		d, err := client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			t.Fatalf("get deployment %s: %v", name, err)
 		}
-		dr := mapDeploymentToDesiredResource(*d)
-		if dr == nil {
-			t.Fatalf("failed to map %s", name)
-		}
-		desired = append(desired, dr)
+		desired = append(desired, mapDeploymentToDesiredResource(*d))
 	}
 
-	appInstance := cluster.NewApplicationInstanceBuilder().
-		WithDesiredResources(desired).
-		Build()
-	testCluster.ApplicationInstances.UpsertApplicationInstance(&appInstance)
 	t.Logf("marked %d/%d deployments as desired", desiredTarget, opts.deployments)
+	return desired
+}
+
+// seedTargets sends each target its share of the desired deployments, the way Octopus would after a
+// deployment. The first target's replacement does the cluster cache's initial sync.
+func seedTargets(
+	ctx context.Context, t *testing.T, clusters *cluster.ClusterList, desired []*cluster.DesiredResource, targets int,
+) {
+	t.Helper()
+	start := time.Now()
+	for i := range targets {
+		target, err := clusters.EnsureCluster(ctx, cluster.ClusterId(fmt.Sprintf("machine-%d", i)))
+		if err != nil {
+			t.Fatalf("EnsureCluster: %v", err)
+		}
+
+		share := map[kube.ResourceKey]*cluster.DesiredResource{}
+		for j := i; j < len(desired); j += targets {
+			share[desired[j].ResourceKey()] = desired[j]
+		}
+
+		applicationInstanceId := cluster.ApplicationInstanceId(fmt.Sprintf("app-%d", i))
+		if err := target.ReplaceDesiredResources(ctx, applicationInstanceId, share, "salt"); err != nil {
+			t.Fatalf("ReplaceDesiredResources: %v", err)
+		}
+		if i == 0 {
+			t.Logf("first target synced the cluster cache in %s", time.Since(start))
+		}
+	}
+	t.Logf("seeded %d targets in %s", targets, time.Since(start))
 }
 
 // mapDeploymentToDesiredResource is the lightweight version of
@@ -249,55 +300,6 @@ func mapDeploymentToDesiredResource(d appsv1.Deployment) *cluster.DesiredResourc
 		WithManifest(manifest).
 		Build()
 	return &dr
-}
-
-// createTestClusterWithQPS mirrors cluster.go's createTestCluster but threads
-// a QPS-overridden rest.Config through to both the cluster cache and the
-// clientset. The vanilla e2e-framework REST config defaults to 5 QPS, which
-// makes sync on a populated cluster sluggish.
-func createTestClusterWithQPS(t *testing.T, cfg *envconf.Config, opts memTestConfig) *cluster.Cluster {
-	t.Helper()
-	restCfg := withQPS(cfg.Client().RESTConfig(), opts)
-
-	applicationInstances := cluster.NewApplicationInstanceList()
-	clusterCache, _, err := cluster.NewCache(
-		t.Context(),
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
-		restCfg,
-		nil,
-		applicationInstances,
-		nil,
-		false,
-		time.Minute,
-	)
-	if err != nil {
-		t.Fatalf("NewCache: %v", err)
-	}
-
-	clientset, err := kubernetes.NewForConfig(restCfg)
-	if err != nil {
-		t.Fatalf("NewForConfig: %v", err)
-	}
-	dynamicClient, err := dynamic.NewForConfig(restCfg)
-	if err != nil {
-		t.Fatalf("dynamic.NewForConfig: %v", err)
-	}
-	cachedDiscoveryClient := memory.NewMemCacheClient(clientset.DiscoveryClient)
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return cluster.NewCluster(
-		"cluster-id",
-		applicationInstances,
-		logger,
-		clusterCache,
-		nil,
-		cachedDiscoveryClient,
-		clientset,
-		dynamicClient,
-		cluster.NoOpUpdater{},
-		false,
-		nil,
-	)
 }
 
 // Two GCs to clear floating garbage from finalizers; FreeOSMemory releases to the OS.

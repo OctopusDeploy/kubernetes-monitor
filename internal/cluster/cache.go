@@ -11,7 +11,6 @@ import (
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -60,18 +59,18 @@ func (c CacheSpan) SetBaggageItem(key string, value any) {
 	}
 }
 
-func NewCache(
+func newCache(
 	ctx context.Context,
 	logger *slog.Logger,
 	config *rest.Config,
 	clientset kubernetes.Interface,
-	applicationInstances *ApplicationInstanceList,
+	interests *resourceInterests,
 	targetNamespaces []string,
 	clusterScopedResources bool,
 	permissionRefreshInterval time.Duration,
 ) (Cache, kube.ResourceFilter, error) {
 	clusterCacheOpts := []cache.UpdateSettingsFunc{
-		cache.SetPopulateResourceInfoHandler(onPopulateResourceInfoHandler(applicationInstances)),
+		cache.SetPopulateResourceInfoHandler(interests.populateResourceInfo),
 		cache.SetTracer(CacheTracer{tracer: tracer, parentContext: context.TODO()}),
 		cache.SetRespectRBAC(cache.RespectRbacNormal),
 		cache.SetClusterSyncRetryTimeout(clusterSyncRetryTimeout),
@@ -103,7 +102,7 @@ func NewCache(
 	}
 
 	clusterCache := cache.NewClusterCache(config, clusterCacheOpts...)
-	clusterCache.OnResourceUpdated(removeTrackedResourceKeyOnResourceDeleted(applicationInstances))
+	clusterCache.OnResourceUpdated(interests.route)
 
 	if permissionFilter != nil {
 		go permissionFilter.startRefreshLoop(ctx, permissionRefreshInterval)
@@ -115,38 +114,4 @@ func NewCache(
 type ResourceInfo struct {
 	ResourceKey kube.ResourceKey
 	OwnerRefs   []v1.OwnerReference
-}
-
-func onPopulateResourceInfoHandler(applicationInstances *ApplicationInstanceList) func(
-	un *unstructured.Unstructured, isRoot bool,
-) (any, bool) {
-	return func(un *unstructured.Unstructured, isRoot bool) (any, bool) {
-		resourceKey := kube.GetResourceKey(un)
-		info := ResourceInfo{ResourceKey: resourceKey, OwnerRefs: getOwnerReferences(un)}
-
-		if applicationInstances.ResourceIsTracked(resourceKey) {
-			return info, true
-		}
-
-		if isRoot == false && applicationInstances.OwnerResourceIsTracked(resourceKey, info.OwnerRefs) {
-			return info, true
-		}
-
-		return info, false
-	}
-}
-
-func removeTrackedResourceKeyOnResourceDeleted(applicationInstances *ApplicationInstanceList) func(
-	newRes *cache.Resource, oldRes *cache.Resource, namespaceResources map[kube.ResourceKey]*cache.Resource,
-) {
-	return func(
-		newRes *cache.Resource, oldRes *cache.Resource, namespaceResources map[kube.ResourceKey]*cache.Resource,
-	) {
-		if oldRes == nil || oldRes.Resource == nil || newRes != nil {
-			return
-		}
-
-		oldResourceCacheKey := oldRes.Info.(ResourceInfo).ResourceKey
-		applicationInstances.RemoveTrackedResourceKey(oldResourceCacheKey)
-	}
 }

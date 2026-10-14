@@ -2,8 +2,7 @@ package cluster
 
 import (
 	"errors"
-	"io"
-	"log/slog"
+	"fmt"
 	"testing"
 
 	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/cache"
@@ -18,34 +17,35 @@ import (
 
 var assertSyncErr = errors.New("cluster cache sync failed")
 
-// newSweepTestCluster builds a Cluster sharing one mock cluster cache
-// this lets tests count how many times a single sweep syncs the cache
-func newSweepTestCluster(t *testing.T, mockCache *mocks.ClusterCache, instanceCount int) *Cluster {
+// newSweepTestClusterList builds targets that share one mock cluster cache, so tests can count how many
+// times a single sweep syncs it.
+func newSweepTestClusterList(t *testing.T, mockCache *mocks.ClusterCache, targetCount, instanceCount int) *ClusterList {
 	t.Helper()
 
-	appList := NewApplicationInstanceList()
-	for i := range instanceCount {
-		instance := NewApplicationInstanceBuilder().
-			WithApplicationInstanceId(string(rune('a' + i))).
-			WithHashSalt("salt").
-			Build()
-		appList.UpsertApplicationInstance(&instance)
-	}
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	clientset := k8sfake.NewSimpleClientset()
+	clusterList := NewClusterListFromConnection(t.Context(), discardLogger(), NoOpUpdater{}, ClusterConnection{
+		Cache:     mockCache,
+		Discovery: &MockCachedDiscoveryClient{FakeDiscovery: clientset.Discovery().(*fake.FakeDiscovery)},
+	})
 
-	return &Cluster{
-		ClusterId:             "cluster-id",
-		ApplicationInstances:  appList,
-		mutex:                 NewMutexWithLogging(logger, "Cluster"),
-		logger:                logger,
-		clusterCache:          mockCache,
-		cachedDiscoveryClient: &MockCachedDiscoveryClient{FakeDiscovery: clientset.Discovery().(*fake.FakeDiscovery)},
+	for target := range targetCount {
+		c, err := clusterList.EnsureCluster(t.Context(), ClusterId(fmt.Sprintf("cluster-%d", target)))
+		if err != nil {
+			t.Fatalf("EnsureCluster: %v", err)
+		}
+		for i := range instanceCount {
+			instance := NewApplicationInstanceBuilder().
+				WithApplicationInstanceId(string(rune('a' + i))).
+				WithHashSalt("salt").
+				Build()
+			seedApplicationInstances(t, c, &instance)
+		}
 	}
+
+	return clusterList
 }
 
-func TestGetApplicationInstanceUpdates_SyncsOncePerSweep(t *testing.T) {
+func TestApplicationInstanceUpdates_SyncsOncePerSweepAcrossTargets(t *testing.T) {
 	mockCache := &mocks.ClusterCache{}
 	mockCache.On("EnsureSynced").Return(nil).Once()
 	mockCache.On("GetClusterInfo").Return(cache.ClusterInfo{Server: "test-server"})
@@ -61,31 +61,31 @@ func TestGetApplicationInstanceUpdates_SyncsOncePerSweep(t *testing.T) {
 		mock.AnythingOfType("func(*cache.Resource, map[kube.ResourceKey]*cache.Resource) bool"),
 	).Return()
 
-	const instanceCount = 3
-	c := newSweepTestCluster(t, mockCache, instanceCount)
+	const targetCount, instanceCount = 2, 3
+	clusterList := newSweepTestClusterList(t, mockCache, targetCount, instanceCount)
 
 	swept := 0
-	for range c.GetApplicationInstanceUpdates(t.Context()) {
+	for range clusterList.ApplicationInstanceUpdates(t.Context()) {
 		swept++
 	}
 
-	if swept != instanceCount {
-		t.Errorf("expected %d application instances to be swept, got %d", instanceCount, swept)
+	if swept != targetCount*instanceCount {
+		t.Errorf("expected %d application instances to be swept, got %d", targetCount*instanceCount, swept)
 	}
 
 	mockCache.AssertExpectations(t)
 	mockCache.AssertNumberOfCalls(t, "EnsureSynced", 1)
 }
 
-func TestGetApplicationInstanceUpdates_SkipsSweepWhenSyncFails(t *testing.T) {
+func TestApplicationInstanceUpdates_SkipsSweepWhenSyncFails(t *testing.T) {
 	mockCache := &mocks.ClusterCache{}
 	mockCache.On("EnsureSynced").Return(assertSyncErr).Once()
 	mockCache.On("GetClusterInfo").Return(cache.ClusterInfo{Server: "test-server"})
 
-	c := newSweepTestCluster(t, mockCache, 3)
+	clusterList := newSweepTestClusterList(t, mockCache, 2, 3)
 
 	swept := 0
-	for range c.GetApplicationInstanceUpdates(t.Context()) {
+	for range clusterList.ApplicationInstanceUpdates(t.Context()) {
 		swept++
 	}
 

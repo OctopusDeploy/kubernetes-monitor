@@ -21,9 +21,12 @@ import (
 )
 
 type memTestConfig struct {
-	deployments       int
-	replicas          int32
-	desiredPct        float64
+	deployments int
+	replicas    int32
+	desiredPct  float64
+	// targets is how many Octopus machines monitor the cluster, splitting the desired deployments between
+	// them. Zero means one.
+	targets           int
 	createConcurrency int
 	qps               float32
 	burst             int

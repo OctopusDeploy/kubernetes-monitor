@@ -110,7 +110,7 @@ func (h *Handler) receive() bool {
 		requestLogger.InfoContext(ctx, "Received event request")
 
 		clusterId := eventRequest.ClusterId.FromProto()
-		reqCluster, err := h.Clusters.GetCluster(clusterId)
+		reqCluster, err := h.Clusters.GetCluster(ctx, clusterId)
 		if err != nil {
 			requestLogger.ErrorContext(ctx, "Error getting cluster", slog.Any("error", err))
 			continue

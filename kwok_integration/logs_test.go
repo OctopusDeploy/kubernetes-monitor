@@ -7,8 +7,6 @@ import (
 
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
-
-	"github.com/octopusdeploy/kubernetes-monitor/internal/cluster"
 )
 
 func TestGetLogs(t *testing.T) {
@@ -24,7 +22,7 @@ func TestGetLogs(t *testing.T) {
 		}).
 		Assess("truncate long logs", func(ctx context.Context, t *testing.T, cfg *envconf.Config) context.Context {
 			podName := "long-logs"
-			testCluster := ctx.Value(testContextKey("testCluster")).(*cluster.Cluster)
+			testCluster := ctx.Value(testContextKey("testCluster")).(*testTarget)
 
 			returnedLogs, err := testCluster.GetContainerLogs(
 				cfg.Namespace(),
@@ -53,7 +51,7 @@ func TestGetLogs(t *testing.T) {
 			ctx context.Context, t *testing.T, cfg *envconf.Config,
 		) context.Context {
 			podName := "short-logs"
-			testCluster := ctx.Value(testContextKey("testCluster")).(*cluster.Cluster)
+			testCluster := ctx.Value(testContextKey("testCluster")).(*testTarget)
 
 			returnedLogs, err := testCluster.GetContainerLogs(
 				cfg.Namespace(),
