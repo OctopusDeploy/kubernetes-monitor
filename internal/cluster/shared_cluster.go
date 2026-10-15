@@ -394,17 +394,15 @@ func (c *sharedCluster) getMonitoredResources(
 	type discoveredResource struct {
 		resource *cache.Resource
 		ownerId  types.UID
-		isOwned  bool
 	}
 	var discovered []discoveredResource
 	c.clusterCache.IterateHierarchyV2(
 		managedLiveObjsKeys,
 		func(resource *cache.Resource, namespaceResources map[kube.ResourceKey]*cache.Resource) bool {
-			ownerId, err := c.getFirstOwnerId(resource, namespaceResources)
+			ownerId, _ := c.getFirstOwnerId(resource, namespaceResources)
 			discovered = append(discovered, discoveredResource{
 				resource: resource,
 				ownerId:  ownerId,
-				isOwned:  err == nil,
 			})
 			return true
 		},
@@ -420,8 +418,10 @@ func (c *sharedCluster) getMonitoredResources(
 				slog.Any("error", manifestErr))
 		}
 
+		// In some cases, a desired resource is also owned, for example, a secret which is owned by the service account
+		// as such, we should alwayus report a desired resource as found, even if it's owned
 		desiredResource, found := desiredResources[d.resource.Info.(ResourceInfo).ResourceKey]
-		if !d.isOwned && found {
+		if found {
 			presentResource, err := NewPresentMonitoredResource(
 				clusterId,
 				d.resource,
