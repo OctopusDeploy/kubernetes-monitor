@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.32.0...v0.32.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* allow owned desired resources ([#23](https://github.com/OctopusDeploy/kubernetes-monitor/issues/23)) ([cfd6cbf](https://github.com/OctopusDeploy/kubernetes-monitor/commit/cfd6cbfd5945eaffb08b0eef9c416aa5af71dad2))
+
 ## [0.32.0](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.31.2...v0.32.0) (2026-10-14)
 
 
