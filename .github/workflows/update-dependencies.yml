@@ -23,6 +23,10 @@ on:
           - warn
           - error
 
+# Renovate authenticates with RENOVATE_GITHUB_TOKEN; the default GITHUB_TOKEN is only used for checkout
+permissions:
+  contents: read
+
 jobs:
   renovate:
     name: Self-hosted Renovate
