@@ -15,7 +15,8 @@ env:
 
 jobs:
   build:
-    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'release' && !startsWith(github.ref, 'refs/tags/kubernetes-monitor-chart')) }}
+    # Fork PRs don't get registry secrets or an OIDC token, so skip them rather than fail
+    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'release' && !startsWith(github.ref, 'refs/tags/kubernetes-monitor-chart')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -49,8 +50,11 @@ jobs:
       - name: Determine PR version
         if: github.event_name == 'pull_request'
         id: new_version
+        # Branch names are attacker-controlled; pass via env rather than interpolating into the script
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          BRANCH_NAME=$(echo ${{ github.head_ref }} | tr '/' '-' | tr '_' '-')
+          BRANCH_NAME=$(echo "$HEAD_REF" | tr '/' '-' | tr '_' '-')
           CURRENT_VERSION=$(git describe --tags --abbrev=0 || echo "0.0.0")
           VERSION="${CURRENT_VERSION}-${BRANCH_NAME}-${{ env.SHORT_SHA }}"
           echo "version=${VERSION}" >> "$GITHUB_ENV"

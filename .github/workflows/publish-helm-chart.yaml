@@ -15,6 +15,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -77,8 +80,11 @@ jobs:
       - name: Generate application version
         if: github.event_name == 'pull_request'
         id: app_version
+        # Branch names are attacker-controlled; pass via env rather than interpolating into the script
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          BRANCH_NAME=$(echo ${{ github.head_ref }} | tr '/' '-' | tr '_' '-')
+          BRANCH_NAME=$(echo "$HEAD_REF" | tr '/' '-' | tr '_' '-')
           CURRENT_VERSION=$(git describe --tags --abbrev=0 || echo "0.0.0")
           VERSION="${CURRENT_VERSION}-${BRANCH_NAME}-${{ env.SHORT_SHA }}"
           echo "APP_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -86,13 +92,15 @@ jobs:
       - name: Generate chart version
         id: version
         shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           chart_version="${{ steps.read_chart_yaml.outputs.version }}"
 
           pre_release=""
           if [[ "${{github.event_name}}" != "release" ]]
           then
-              cleansed_branch=$(echo ${{ github.head_ref }} | tr '/' '-' | tr '_' '-')
+              cleansed_branch=$(echo "$HEAD_REF" | tr '/' '-' | tr '_' '-')
               pre_release="-${cleansed_branch}-$(date +'%Y%m%d%H%M%S')"
           fi
 
@@ -117,8 +125,9 @@ jobs:
 
   publish_to_octopus:
     runs-on: ubuntu-latest
-    # We publish to Artifactory if this is a pull request or is a release for the helm chart
-    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'release' && startsWith(github.ref, 'refs/tags/kubernetes-monitor-chart')) }}
+    # We publish to Artifactory if this is a pull request or is a release for the helm chart.
+    # Fork PRs don't get an OIDC token, so skip them rather than fail.
+    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || (github.event_name == 'release' && startsWith(github.ref, 'refs/tags/kubernetes-monitor-chart')) }}
     needs: version_and_package
     permissions:
       id-token: write

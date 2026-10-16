@@ -5,6 +5,10 @@ on:
 
 name: release-please
 
+# release-please authenticates with GHA_TOKEN, so the default GITHUB_TOKEN needs nothing beyond read
+permissions:
+  contents: read
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
