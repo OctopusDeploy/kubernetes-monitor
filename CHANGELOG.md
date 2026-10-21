@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.2](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.32.1...v0.32.2) (2026-10-21)
+
+
+### Bug Fixes
+
+* rebuild with non-impacted SSL certificates ([#27](https://github.com/OctopusDeploy/kubernetes-monitor/issues/27)) ([886a5f7](https://github.com/OctopusDeploy/kubernetes-monitor/commit/886a5f7590149ed05725d8f1ddbe912a0cc7cac2))
+
 ## [0.32.1](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.32.0...v0.32.1) (2026-10-15)
 
 
