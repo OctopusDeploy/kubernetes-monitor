@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
       - name: Generate docs
         working-directory: charts/kubernetes-monitor
         run: "npm run generate-docs"
@@ -117,7 +117,7 @@ jobs:
         if: (github.event_name == 'release' && startsWith(github.ref, 'refs/tags/kubernetes-monitor-chart'))
         run: helm package './charts/kubernetes-monitor' --version '${{ steps.version.outputs.CHART_VERSION }}'
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         name: Upload packaged chart
         with:
           name: "${{ steps.version.outputs.PACKAGE_NAME }}"
@@ -133,25 +133,25 @@ jobs:
       id-token: write
     steps:
       - name: Download packaged chart
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: "${{ needs.version_and_package.outputs.PACKAGE_NAME }}"
 
       - name: Login to Octopus
-        uses: OctopusDeploy/login@d156cc2dd8d6f4592c3a0e54e8b51a4ea9198dd5 # v2.0.1
+        uses: OctopusDeploy/login@5e2331a069ebc144b20ded22766dfce025dd9e73 # v2.0.2
         with:
           server: ${{ vars.OCTOPUS_SERVER }}
           service_account_id: ${{ secrets.OCTOPUS_SERVICE_ACCOUNT }}
 
       - name: Push helm chart to Octopus Deploy 🐙
-        uses: OctopusDeploy/push-package-action@e2b339863f2aba04d1aead9675136af1bd2bceaa # v4.0.5
+        uses: OctopusDeploy/push-package-action@88c472a064af6485c4d0cc07d587213895a74a2e # v4.0.6
         with:
           space: "${{ vars.DEPLOY_K8S_OWNERS_SPACE_NAME }}"
           packages: ${{ needs.version_and_package.outputs.PACKAGE_NAME }}
           overwrite_mode: IgnoreIfExists
 
       - name: Create a release in Octopus Deploy 🐙
-        uses: OctopusDeploy/create-release-action@4eaeba13bef87ec399ecac936e9f513758784694 # v4.2.3
+        uses: OctopusDeploy/create-release-action@2fceebb1d9cc8624d726a77e2faf93948de6741d # v4.2.5
         with:
           space: "${{ vars.DEPLOY_K8S_OWNERS_SPACE_NAME }}"
           project: "Octopus Kubernetes Monitor"
