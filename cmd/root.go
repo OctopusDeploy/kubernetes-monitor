@@ -26,6 +26,7 @@ var rootCmd = &cobra.Command{
 Makes a persistent connection with the server to receive resources to monitor and
 report on resources that exist in the cluster.
 `,
+
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Handle SIGINT (CTRL+C) gracefully.
 		ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt)
