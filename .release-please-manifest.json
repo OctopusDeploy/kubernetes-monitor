@@ -1,4 +1,4 @@
 {
   ".": "0.32.2",
-  "charts/kubernetes-monitor": "0.45.0"
+  "charts/kubernetes-monitor": "0.46.0"
 }
