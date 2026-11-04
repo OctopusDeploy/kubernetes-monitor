@@ -67,7 +67,7 @@ jobs:
 
       - name: Login to Artifactory
         if: github.event_name == 'release' || steps.changed-files-specific.outputs.any_changed == 'true'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: "docker.packages.octopushq.com"
           username: ${{ secrets.ARTIFACTORY_USERNAME }}
@@ -76,7 +76,7 @@ jobs:
 
       - name: Build and push to artifactory
         if: github.event_name == 'release' || steps.changed-files-specific.outputs.any_changed == 'true'
-        uses: depot/build-push-action@98e78adca7817480b8185f474a400b451d74e287 # v1.18.0
+        uses: depot/build-push-action@0f27be7c41d76663a98518dfe68f1c46582242c4 # v1.19.0
         with:
           project: 6nsnwhw6t5
           push: true
@@ -87,7 +87,7 @@ jobs:
 
       # Only push to production if it's a release
       - name: Login to Docker Hub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         if: github.event_name == 'release'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
