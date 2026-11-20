@@ -8,8 +8,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/OctopusDeploy/octopus-grpc/go/pkg/certificate"
-
 	certpool "github.com/octopusdeploy/kubernetes-monitor/internal/certificate"
 )
 
@@ -61,7 +59,7 @@ func TestVerifyServerCertificate_CorrectlyVerifies_WhenUsingSubCaSignedCert_Usin
 	}
 
 	// act/assert
-	err = certificate.VerifyServerCertificateWithRoot(clientCerts, rootBundle)
+	err = verifyChain(clientCerts, rootBundle)
 	if err != nil {
 		t.Fatalf("Expected no error verifying server certificate, got %v", err)
 	}
@@ -82,7 +80,7 @@ func TestVerifyServerCertificate_DoesNotVerify_WhenUsingSubCaSignedCert_NotUsing
 	}
 
 	// act/assert
-	err = certificate.VerifyServerCertificateWithRoot(clientCerts, rootBundle)
+	err = verifyChain(clientCerts, rootBundle)
 	if err == nil {
 		t.Fatal("Expected error verifying server certificate, got none")
 	}
@@ -103,10 +101,22 @@ func TestVerifyServerCertificate_CorrectlyVerifies_WhenUsingRootCaSignedCert_Usi
 	}
 
 	// act/assert
-	err = certificate.VerifyServerCertificateWithRoot(clientCerts, rootBundle)
+	err = verifyChain(clientCerts, rootBundle)
 	if err != nil {
 		t.Fatalf("Expected no error verifying server certificate, got %v", err)
 	}
+}
+
+// verifyChain checks the chain against the pool alone. Hostname checking belongs
+// to octopus-grpc and is tested there; these tests cover what the pool trusts.
+func verifyChain(certs []*x509.Certificate, roots *x509.CertPool) error {
+	intermediates := x509.NewCertPool()
+	for _, cert := range certs[1:] {
+		intermediates.AddCert(cert)
+	}
+
+	_, err := certs[0].Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates})
+	return err
 }
 
 func getCertificates(filePath string) ([]*x509.Certificate, error) {
