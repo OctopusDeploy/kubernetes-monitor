@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.3](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.32.2...v0.32.3) (2026-11-20)
+
+
+### Bug Fixes
+
+* bump octopus-grpc to v0.6.0 ([#31](https://github.com/OctopusDeploy/kubernetes-monitor/issues/31)) ([4710044](https://github.com/OctopusDeploy/kubernetes-monitor/commit/4710044acfda7a747ab6db6e2976e0bc213bb6a9))
+
 ## [0.32.2](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.32.1...v0.32.2) (2026-10-21)
 
 
