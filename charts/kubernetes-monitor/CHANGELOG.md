@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/OctopusDeploy/kubernetes-monitor/compare/kubernetes-monitor-chart-v0.46.0...kubernetes-monitor-chart-v0.47.0) (2026-11-20)
+
+
+### Features
+
+* **main:** release 0.32.3 ([#32](https://github.com/OctopusDeploy/kubernetes-monitor/issues/32)) ([ad84d65](https://github.com/OctopusDeploy/kubernetes-monitor/commit/ad84d6525253c1c5733602dee74e23be3ec75ee4))
+
 ## [0.46.0](https://github.com/OctopusDeploy/kubernetes-monitor/compare/kubernetes-monitor-chart-v0.45.0...kubernetes-monitor-chart-v0.46.0) (2026-10-21)
 
 
