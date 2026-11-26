@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.4](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.32.3...v0.32.4) (2026-11-26)
+
+
+### Bug Fixes
+
+* don't infinitely loop on circular ownership references ([#34](https://github.com/OctopusDeploy/kubernetes-monitor/issues/34)) ([28e9b9f](https://github.com/OctopusDeploy/kubernetes-monitor/commit/28e9b9f619ba63a6688b51b3bcc3c4b0967cab3e))
+
 ## [0.32.3](https://github.com/OctopusDeploy/kubernetes-monitor/compare/v0.32.2...v0.32.3) (2026-11-20)
 
 
