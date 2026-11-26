@@ -233,15 +233,35 @@ func (c *Cluster) sendResourceChangeUpdates(ctx context.Context, updates []*Appl
 	}
 }
 
-// GetRootParentResource recursively searches for the top level ownerId for the child resource provided.
+// getRootParentResource walks up the owner chain from ownerId and returns the top level ownerId.
+// The walk stops if it reaches an ID it has already visited (for example, a resource that lists
+// itself as its own owner, or two resources that own each other). In that case it returns the
+// last ID it reached before the loop, so a malformed owner chain cannot crash the monitor.
 func getRootParentResource(ownerId types.UID, childResources map[kube.ResourceKey]*ChildMonitoredResource) types.UID {
+	visited := map[types.UID]struct{}{}
+
+	for {
+		visited[ownerId] = struct{}{}
+
+		parentOwnerId, found := findOwnerOf(ownerId, childResources)
+		if !found {
+			return ownerId
+		}
+		if _, seen := visited[parentOwnerId]; seen {
+			return ownerId
+		}
+		ownerId = parentOwnerId
+	}
+}
+
+// findOwnerOf returns the OwnerId of the child resource whose ResourceId is resourceId.
+func findOwnerOf(resourceId types.UID, childResources map[kube.ResourceKey]*ChildMonitoredResource) (types.UID, bool) {
 	for _, possibleParentResource := range childResources {
-		if ownerId == possibleParentResource.ResourceId {
-			return getRootParentResource(possibleParentResource.OwnerId, childResources)
+		if possibleParentResource.ResourceId == resourceId {
+			return possibleParentResource.OwnerId, true
 		}
 	}
-
-	return ownerId
+	return "", false
 }
 
 // gvkIsKnownToCluster reports whether the desired resource's type is still registered
