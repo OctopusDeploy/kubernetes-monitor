@@ -234,14 +234,28 @@ func (c *Cluster) sendResourceChangeUpdates(ctx context.Context, updates []*Appl
 }
 
 // GetRootParentResource recursively searches for the top level ownerId for the child resource provided.
+// When the same UID is visited twice, we break the loop so we don't infinitely loop
 func getRootParentResource(ownerId types.UID, childResources map[kube.ResourceKey]*ChildMonitoredResource) types.UID {
-	for _, possibleParentResource := range childResources {
-		if ownerId == possibleParentResource.ResourceId {
-			return getRootParentResource(possibleParentResource.OwnerId, childResources)
-		}
-	}
+	visited := map[types.UID]struct{}{}
+	for {
+		visited[ownerId] = struct{}{}
 
-	return ownerId
+		var parent *ChildMonitoredResource
+		for _, possibleParentResource := range childResources {
+			if ownerId == possibleParentResource.ResourceId {
+				parent = possibleParentResource
+				break
+			}
+		}
+
+		if parent == nil {
+			return ownerId
+		}
+		if _, seen := visited[parent.OwnerId]; seen {
+			return ownerId
+		}
+		ownerId = parent.OwnerId
+	}
 }
 
 // gvkIsKnownToCluster reports whether the desired resource's type is still registered

@@ -6,7 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/argoproj/argo-cd/gitops-engine/v3/pkg/utils/kube"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/octopusdeploy/kubernetes-monitor/internal/kubernetes"
 )
@@ -113,4 +115,38 @@ func Test_getSyncStatus_NilDesiredManifest(t *testing.T) {
 
 	assert.Equal(t, SyncStatusUnknown, syncStatus.Status)
 	assert.Equal(t, "Missing desired resource manifest", syncStatus.Message)
+}
+
+// I'm not quite sure how it's possible, but ownership loops can occur. This asserts that we don't follow this loop infinitely
+func TestGetRootParentResource(t *testing.T) {
+	child := func(name string, resourceId, ownerId types.UID) (kube.ResourceKey, *ChildMonitoredResource) {
+		return kube.ResourceKey{Kind: "Pod", Namespace: "ns", Name: name},
+			&ChildMonitoredResource{ResourceId: resourceId, OwnerId: ownerId}
+	}
+	build := func(entries ...func() (kube.ResourceKey, *ChildMonitoredResource)) map[kube.ResourceKey]*ChildMonitoredResource {
+		m := map[kube.ResourceKey]*ChildMonitoredResource{}
+		for _, e := range entries {
+			k, v := e()
+			m[k] = v
+		}
+		return m
+	}
+	entry := func(name string, resourceId, ownerId types.UID) func() (kube.ResourceKey, *ChildMonitoredResource) {
+		return func() (kube.ResourceKey, *ChildMonitoredResource) { return child(name, resourceId, ownerId) }
+	}
+
+	t.Run("follows chain to root", func(t *testing.T) {
+		resources := build(entry("pod", "pod", "rs"), entry("rs", "rs", "deploy"))
+		assert.Equal(t, types.UID("deploy"), getRootParentResource("rs", resources))
+	})
+
+	t.Run("self-owned resource terminates", func(t *testing.T) {
+		resources := build(entry("a", "a", "a"))
+		assert.Equal(t, types.UID("a"), getRootParentResource("a", resources))
+	})
+
+	t.Run("multi-resource cycle terminates", func(t *testing.T) {
+		resources := build(entry("a", "a", "b"), entry("b", "b", "c"), entry("c", "c", "a"))
+		assert.Equal(t, types.UID("c"), getRootParentResource("a", resources))
+	})
 }
